@@ -27,7 +27,6 @@
  
 #if defined __INTEL_COMPILER
 # pragma warning (disable:177)
-# pragma warning (disable:2203)
 # pragma warning (disable:2259)
 # pragma warning (disable:2338)
 #endif	/* __INTEL_COMPILER */
