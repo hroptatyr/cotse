@@ -74,18 +74,10 @@ xpopcnt64(uint64_t v)
 static inline __attribute__((pure, const)) uint32_t
 xpopcnt32(uint32_t v)
 {
-#if 1
-	unsigned int c = 0U;
-	for (c = 0; v; c++) {
-		v &= v - 1;
-	}
-	return c;
-#else
 	v = v - ((v >> 1U) & 0x55555555U);
 	v = (v & 0x33333333U) + ((v >> 2U) & 0x33333333U);
 	/* count */
 	return ((v + (v >> 4U) & 0xF0F0F0FU) * 0x1010101U) >> 24U;
-#endif	/* 1 */
 }
 
 static inline __attribute__((pure, const)) uint32_t
