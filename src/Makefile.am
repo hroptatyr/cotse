@@ -25,6 +25,7 @@ EXTRA_DIST += version.c.in
 lib_LTLIBRARIES += libcotse.la
 libcotse_la_SOURCES = cotse.h
 libcotse_la_SOURCES += nifty.h
+libcotse_la_SOURCES += comp-to.c comp-to.h
 libcotse_la_SOURCES += pfor.c pfor.h
 libcotse_la_SOURCES += bitpack.c bitpack.h bitpack64.h
 libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
