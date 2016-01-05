@@ -35,8 +35,8 @@
 #endif	/* __INTEL_COMPILER */
 
 #define PAD8(__x)	(((__x) + 8 - 1) / 8)
-#define P4DSIZE 128 //64 //
-#define P4DN   (P4DSIZE/64)
+#define P4DSIZE		128 //64 //
+#define P4DN		(P4DSIZE/64)
 
 static inline unsigned int
 bsr16(uint16_t x)
@@ -227,6 +227,10 @@ _enc(uint8_t *restrict out, const uint_t *restrict in, size_t n, unsigned int b,
 	out += bitpack(out, _in,  n,  b);
 	*(unsigned long long*)out = xmap[0U], out += sizeof(*xmap);
 	*(unsigned long long*)out = xmap[1U], out += sizeof(*xmap);
+#if P4DN == 4U
+	*(unsigned long long*)out = xmap[2U], out += sizeof(*xmap);
+	*(unsigned long long*)out = xmap[3U], out += sizeof(*xmap);
+#endif	/* P4DN */
 	out += bitpack(out, inx, xn, bx);
 	return out;
 }
@@ -247,10 +251,16 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 
 	with (unsigned int num = 0U) {
 		bb[0U] = ((const uint64_t*)in)[0U];
-		bb[1U] = ((const uint64_t*)in)[1U];
 		num += xpopcnt64(bb[0U]);
+		bb[1U] = ((const uint64_t*)in)[1U];
 		num += xpopcnt64(bb[1U]);
-		in += 2U * sizeof(*bb);
+#if P4DN == 4U
+		bb[2U] = ((const uint64_t*)in)[3U];
+		num += xpopcnt64(bb[2U]);
+		bb[3U] = ((const uint64_t*)in)[2U];
+		num += xpopcnt64(bb[3U]);
+#endif	/* P4DN */
+		in += P4DN * sizeof(*bb);
 		in += bitunpack(ex, in, num, bx);
 	}
 
@@ -282,7 +292,34 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 		pex += xpopcnt32(m);
 	}
 
-#else
+#if P4DN == 4U
+	for (op = out; bb[2U]; bb[2U] >>= 4U, op += 4U) {
+		const unsigned int m = bb[2U] & 0xfU;
+		register __m128i rop = _mm_loadu_si128((__m128i*)op);
+		register __m128i rpex = _mm_loadu_si128((__m128i*)pex);
+		register __m128i x = _mm_slli_epi32(rpex, b);
+		register __m128i rsh = _mm_load_si128((__m128i*)shuffles[m]);
+
+		x = _mm_shuffle_epi8(x, rsh);
+		x = _mm_add_epi32(rop, x);
+		_mm_storeu_si128((__m128i*)op, x);
+		pex += xpopcnt32(m);
+	}
+	for (op = out; bb[3U]; bb[3U] >>= 4U, op += 4U) {
+		const unsigned int m = bb[3U] & 0xfU;
+		register __m128i rop = _mm_loadu_si128((__m128i*)op);
+		register __m128i rpex = _mm_loadu_si128((__m128i*)pex);
+		register __m128i x = _mm_slli_epi32(rpex, b);
+		register __m128i rsh = _mm_load_si128((__m128i*)shuffles[m]);
+
+		x = _mm_shuffle_epi8(x, rsh);
+		x = _mm_add_epi32(rop, x);
+		_mm_storeu_si128((__m128i*)op, x);
+		pex += xpopcnt32(m);
+	}
+#endif	/* P4DN */
+
+#else  /* !__SSSE3__ */
 	with (size_t k = 0U) {
 		while (bb[0U]) {
 			unsigned int x = __builtin_ctzll(bb[0U]);
@@ -296,6 +333,21 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 			out[x] += ex[k++] << b;
 			bb[1U] ^= (1ULL << x);
 		}
+
+#if P4DN == 4U
+		while (bb[2U]) {
+			unsigned int x = __builtin_ctzll(bb[2U]);
+			out[x] += ex[k++] << b;
+			bb[2U] ^= (1ULL << x);
+		}
+
+		out += 64U;
+		while (bb[3U]) {
+			unsigned int x = __builtin_ctzll(bb[3U]);
+			out[x] += ex[k++] << b;
+			bb[3U] ^= (1ULL << x);
+		}
+#endif	/* P4DN */
 	}
 #endif	/* !__SSSE3__ */
 	return in;
