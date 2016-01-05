@@ -22,6 +22,15 @@ CLEANFILES += version.c
 EXTRA_DIST += version.c.in
 
 
+lib_LTLIBRARIES += libcotse.la
+libcotse_la_SOURCES = cotse.h
+libcotse_la_SOURCES += nifty.h
+libcotse_la_SOURCES += pfor.c pfor.h
+libcotse_la_SOURCES += bitpack.c bitpack.h bitpack64.h
+libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
+libcotse_la_CPPFLAGS += -D_GNU_SOURCE
+
+
 ## version rules
 version.c: version.c.in $(top_builddir)/.version
 	$(AM_V_GEN) PATH="$(top_builddir)/build-aux:$${PATH}" \
