@@ -31,6 +31,11 @@ libcotse_la_SOURCES += bitpack.c bitpack.h bitpack64.h
 libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
 libcotse_la_CPPFLAGS += -D_GNU_SOURCE
 
+noinst_PROGRAMS += bla
+bla_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
+bla_LDFLAGS = $(AM_LDFLAGS) -lm -static
+bla_LDADD = libcotse.la
+
 
 ## version rules
 version.c: version.c.in $(top_builddir)/.version
