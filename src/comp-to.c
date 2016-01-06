@@ -140,7 +140,7 @@ _dcmp(cots_to_t *restrict tgt, size_t nt, const uint8_t *restrict c, size_t z)
 	adavgt(tgt, nt, avg);
 	/* and cumsum the whole thing */
 	sumt(tgt, nt);
-	return ci + 8U;
+	return ci;
 }
 
 
