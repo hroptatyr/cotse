@@ -18,7 +18,6 @@ static unsigned char data[sizeof(them)];
 static void
 push(const char *line, size_t UNUSED(llen))
 {
-	static long unsigned int metr;
 	char *on;
 	long unsigned int s, x;
 
@@ -41,7 +40,7 @@ push(const char *line, size_t UNUSED(llen))
 static void
 pr(void)
 {
-#if 1
+#if 0
 	cots_to_t last = 0U;
 
 	for (size_t i = 0U; i < 4U; i++) {
@@ -88,7 +87,6 @@ main(int argc, char *argv[])
 			write(STDOUT_FILENO, data, z);
 
 			nthem = 0U;
-			break;
 		}
 	}
 	close(STDOUT_FILENO);
