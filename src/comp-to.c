@@ -62,6 +62,16 @@ avgt(const cots_to_t *t, size_t nt)
 }
 
 static void
+delt(cots_to_t *restrict tgt, const cots_to_t *restrict src, size_t nt)
+{
+	tgt[0U] = src[0U];
+	for (size_t i = 1U; i < nt; i++) {
+		tgt[i] = src[i] - src[i - 1U];
+	}
+	return;
+}
+
+static void
 sumt(cots_to_t *restrict io, size_t nt)
 {
 	for (size_t i = 1U; i < nt; i++) {
@@ -95,15 +105,12 @@ adavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg)
 static size_t
 _comp(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 {
-	cots_to_t td[nt];
+	cots_to_t td[MAX_NT];
 	cots_to_t avg;
 	size_t z = 0U;
 
 	/* deltaify */
-	td[0U] = to[0U];
-	for (size_t i = 1U; i < nt; i++) {
-		td[i] = to[i] - to[i - 1U];
-	}
+	delt(td, to, nt);
 	/* estimate average delta */
 	avg = avgt(td, nt);
 	/* kill the average */
