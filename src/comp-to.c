@@ -106,23 +106,23 @@ _comp(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 }
 
 static size_t
-_dcmp(cots_to_t *restrict tgt, size_t n, const uint8_t *restrict c, size_t z)
+_dcmp(cots_to_t *restrict tgt, size_t nt, const uint8_t *restrict c, size_t z)
 {
 	cots_to_t avg;
 	size_t ci = 0U;
 	(void)z;
 
-	/* truncate n */
-	n = n > MAX_NT ? MAX_NT : n;
+	/* truncate nt */
+	nt = nt > MAX_NT ? MAX_NT : nt;
 
 	memcpy(&avg, c, sizeof(avg));
 	ci += sizeof(avg);
-	ci += pfor_dec64(tgt, c + ci, n);
+	ci += pfor_dec64(tgt, c + ci, nt);
 
 	/* add average too */
-	adavgt(tgt, n, avg);
+	adavgt(tgt, nt, avg);
 	/* and cumsum the whole thing */
-	for (size_t i = 1U; i < n; i++) {
+	for (size_t i = 1U; i < nt; i++) {
 		tgt[i] = tgt[i] + tgt[i - 1U];
 	}
 	return ci + 8U;
