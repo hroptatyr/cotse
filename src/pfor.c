@@ -35,8 +35,8 @@
 #endif	/* __INTEL_COMPILER */
 
 #define PAD8(__x)	(((__x) + 8 - 1) / 8)
-#define P4DSIZE		128 //64 //
-#define P4DN		(P4DSIZE/64)
+#define P4DSIZE		(128U)
+#define P4DN		(P4DSIZE / 64U)
 
 static inline unsigned int
 bsr16(uint16_t x)
@@ -217,11 +217,17 @@ _enc(uint8_t *restrict out, const uint_t *restrict in, size_t n, unsigned int b,
 		inx[i] = in[c] >> b;
 	}
 	out += bitpack(out, _in,  n,  b);
-	*(unsigned long long*)out = xmap[0U], out += sizeof(*xmap);
-	*(unsigned long long*)out = xmap[1U], out += sizeof(*xmap);
-#if P4DN == 4U
-	*(unsigned long long*)out = xmap[2U], out += sizeof(*xmap);
-	*(unsigned long long*)out = xmap[3U], out += sizeof(*xmap);
+
+	*(uint64_t*)out = xmap[0U], out += sizeof(*xmap);
+	*(uint64_t*)out = xmap[1U], out += sizeof(*xmap);
+#if P4DN >= 4U
+	*(uint64_t*)out = xmap[2U], out += sizeof(*xmap);
+	*(uint64_t*)out = xmap[3U], out += sizeof(*xmap);
+#endif	/* P4DN */
+#if P4DN > 4U
+	for (size_t j = 4U; j < P4DN; j++, out += sizeof(*xmap)) {
+		*(uint64_t*)out = xmap[j];
+	}
 #endif	/* P4DN */
 	out += bitpack(out, inx, xn, bx);
 	return out;
@@ -231,7 +237,7 @@ _enc(uint8_t *restrict out, const uint_t *restrict in, size_t n, unsigned int b,
 static const uint8_t*
 _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b, unsigned int bx)
 {
-	uint_t ex[0x100U + 8U];
+	uint_t ex[2U * P4DSIZE + 8U];
 	uint64_t bb[P4DN];
   
 	in += bitunpack(out, in, n, b >> 1U);
@@ -246,17 +252,24 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 		num += xpopcnt64(bb[0U]);
 		bb[1U] = ((const uint64_t*)in)[1U];
 		num += xpopcnt64(bb[1U]);
-#if P4DN == 4U
+#if P4DN >= 4U
 		bb[2U] = ((const uint64_t*)in)[3U];
 		num += xpopcnt64(bb[2U]);
 		bb[3U] = ((const uint64_t*)in)[2U];
 		num += xpopcnt64(bb[3U]);
 #endif	/* P4DN */
+#if P4DN > 4U
+		for (size_t j = 4U; j < P4DN; j++) {
+			bb[j] = ((const uint64_t*)in)[j];
+			num += xpopcnt64(bb[j]);
+		}
+#endif	/* P4DN */
+
 		in += P4DN * sizeof(*bb);
 		in += bitunpack(ex, in, num, bx);
 	}
 
-#if defined __SSSE3__ && USIZE == 32
+#if defined __SSSE3__ && USIZE == 32 && P4DN <= 4U
 	uint_t *op, *pex = ex;
 
 	for (op = out; bb[0U]; bb[0U] >>= 4U, op += 4U) {
@@ -311,7 +324,7 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 	}
 #endif	/* P4DN */
 
-#else  /* !__SSSE3__ */
+#else  /* !__SSSE3__  !USIZE == 32  P4DN > 4U*/
 	with (size_t k = 0U) {
 		while (bb[0U]) {
 			unsigned int x = __builtin_ctzll(bb[0U]);
@@ -326,7 +339,8 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 			bb[1U] ^= (1ULL << x);
 		}
 
-#if P4DN == 4U
+#if P4DN >= 4U
+		out += 64U;
 		while (bb[2U]) {
 			unsigned int x = __builtin_ctzll(bb[2U]);
 			out[x] += ex[k++] << b;
@@ -338,6 +352,16 @@ _dec(uint_t *restrict out, size_t n, const uint8_t *restrict in, unsigned int b,
 			unsigned int x = __builtin_ctzll(bb[3U]);
 			out[x] += ex[k++] << b;
 			bb[3U] ^= (1ULL << x);
+		}
+#endif	/* P4DN */
+#if P4DN > 4U
+		out += 64U;
+		for (size_t j = 4U; j < P4DN; j++, out += 64U) {
+			while (bb[j]) {
+				unsigned int x = __builtin_ctzll(bb[j]);
+				out[x] += ex[k++] << b;
+				bb[j] ^= (1ULL << x);
+			}
 		}
 #endif	/* P4DN */
 	}
