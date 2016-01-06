@@ -62,6 +62,15 @@ avgt(const cots_to_t *t, size_t nt)
 }
 
 static void
+sumt(cots_to_t *restrict io, size_t nt)
+{
+	for (size_t i = 1U; i < nt; i++) {
+		io[i] += io[i - 1U];
+	}
+	return;
+}
+
+static void
 rmavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg)
 {
 	for (size_t i = 0U; i < nt; i++) {
@@ -90,6 +99,7 @@ _comp(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 	cots_to_t avg;
 	size_t z = 0U;
 
+	/* deltaify */
 	td[0U] = to[0U];
 	for (size_t i = 1U; i < nt; i++) {
 		td[i] = to[i] - to[i - 1U];
@@ -122,9 +132,7 @@ _dcmp(cots_to_t *restrict tgt, size_t nt, const uint8_t *restrict c, size_t z)
 	/* add average too */
 	adavgt(tgt, nt, avg);
 	/* and cumsum the whole thing */
-	for (size_t i = 1U; i < nt; i++) {
-		tgt[i] = tgt[i] + tgt[i - 1U];
-	}
+	sumt(tgt, nt);
 	return ci + 8U;
 }
 
@@ -138,8 +146,10 @@ comp_to(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 	memcpy(tgt, &nt, sizeof(nt));
 	res += sizeof(nt);
 	for (size_t i = 0U; i < nt; i += MAX_NT) {
+		const size_t mt = MAX_NT < nt - i ? MAX_NT : nt - i;
+
 		/* for small NT resort to dynarrs */
-		res += _comp(tgt + res, to + i, nt - i);
+		res += _comp(tgt + res, to + i, mt);
 	}
 	return res;
 }
@@ -155,8 +165,10 @@ dcmp_to(cots_to_t *restrict tgt, const uint8_t *c, size_t nz)
 	ci += sizeof(nt);
 
 	for (size_t i = 0U; i < nt; i += MAX_NT) {
+		const size_t mt = MAX_NT < nt - i ? MAX_NT : nt - i;
+
 		/* small NTs are unpacked in _dcmp_small() */
-		ci += _dcmp(tgt + i, nt - i, c + ci, nz - ci);
+		ci += _dcmp(tgt + i, mt, c + ci, nz - ci);
 	}
 	return nt;
 }

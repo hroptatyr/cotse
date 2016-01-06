@@ -32,6 +32,7 @@
 
 #if defined __INTEL_COMPILER
 # pragma warning (disable:2259)
+# pragma warning (disable:2338)
 #endif	/* __INTEL_COMPILER */
 
 #define PAD8(__x)	(((__x) + 8 - 1) / 8)
@@ -166,8 +167,15 @@ _calc(const uint_t *restrict in, size_t n, unsigned int *pbx)
 		cnt[bsr(*ip)]++, b |= *ip++;
 		cnt[bsr(*ip)]++, b |= *ip++;
 	}
-	while (ip != in + n) {
+	switch (n & 3ULL) {
+	case 3U:
 		cnt[bsr(*ip)]++, b |= *ip++;
+	case 2U:
+		cnt[bsr(*ip)]++, b |= *ip++;
+	case 1U:
+		cnt[bsr(*ip)]++, b |= *ip++;
+	case 0U:
+		break;
 	}
 	b = bsr(b); 
 
@@ -207,8 +215,15 @@ _enc(uint8_t *restrict out, const uint_t *restrict in, size_t n, unsigned int b,
 		miss[xn] = i + 3U, xn += in[i + 3U] > msk,
 			_in[i + 3U] = in[i + 3U] & msk;
 	}
-	for (; i != n; i++) {
-		miss[xn] = i, xn += in[i] > msk, _in[i] = in[i] & msk;
+	switch (n & 3ULL) {
+	case 3U:
+		miss[xn] = i, xn += in[i] > msk, _in[i] = in[i] & msk, i++;
+	case 2U:
+		miss[xn] = i, xn += in[i] > msk, _in[i] = in[i] & msk, i++;
+	case 1U:
+		miss[xn] = i, xn += in[i] > msk, _in[i] = in[i] & msk, i++;
+	case 0U:
+		break;
 	}
 	for (i = 0U; i != xn; i++) {
 		unsigned int c = miss[i];
