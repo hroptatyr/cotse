@@ -1,4 +1,4 @@
-/*** comp-px.c -- compression routines for d32 prices
+/*** comp-qx.c -- compression routines for d64 quantities
  *
  * Copyright (C) 2014-2016 Sebastian Freundt
  *
@@ -41,9 +41,9 @@
 #include <string.h>
 #include <math.h>
 #include "cotse.h"
-#include "comp-px.h"
+#include "comp-qx.h"
 #include "pfor.h"
-#include "dfp754_d32.h"
+#include "dfp754_d64.h"
 #include "nifty.h"
 
 /* this should be at most 64U * P4DSIZE (cf. pfor.c)
@@ -53,14 +53,14 @@
 
 
 static void
-xodt(uint32_t *restrict tgt, const cots_px_t *restrict src, size_t np)
+xodt(uint64_t *restrict tgt, const cots_qx_t *restrict src, size_t np)
 {
-	tgt[0U] = bits32(src[0U]);
+	tgt[0U] = bits64(src[0U]);
 	for (size_t i = 1U; i < np; i++) {
-		uint32_t x = 0U;
+		uint64_t x = 0U;
 		/* delta */
-		x ^= bits32(src[i - 1U]);
-		x ^= bits32(src[i]);
+		x ^= bits64(src[i - 1U]);
+		x ^= bits64(src[i]);
 		/* and store */
 		tgt[i] = x;
 	}
@@ -68,40 +68,40 @@ xodt(uint32_t *restrict tgt, const cots_px_t *restrict src, size_t np)
 }
 
 static void
-xort(cots_px_t *restrict tgt, const uint32_t *restrict src, size_t np)
+xort(cots_qx_t *restrict tgt, const uint64_t *restrict src, size_t np)
 {
-	uint32_t sum = 0U;
+	uint64_t sum = 0U;
 
 	for (size_t i = 0U; i < np; i++) {
 		/* sum up */
 		sum ^= src[i];
-		tgt[i] = bobs32(sum);
+		tgt[i] = bobs64(sum);
 	}
 	return;
 }
 
 static void
-rolt(uint32_t *restrict io, size_t np)
+rolt(uint64_t *restrict io, size_t np)
 {
 	for (size_t i = 0U; i < np; i++) {
 		/* rol it */
-		io[i] = (io[i] << 1U) ^ (io[i] >> 31U);
+		io[i] = (io[i] << 1U) ^ (io[i] >> 63U);
 	}
 	return;
 }
 
 static void
-rort(uint32_t *restrict io, size_t np)
+rort(uint64_t *restrict io, size_t np)
 {
 	for (size_t i = 0U; i < np; i++) {
 		/* ror it */
-		io[i] = (io[i] >> 1U) ^ (io[i] << 31U);
+		io[i] = (io[i] >> 1U) ^ (io[i] << 63U);
 	}
 	return;
 }
 
 static uint64_t
-rotmap(const uint32_t *v, size_t n)
+rotmap(const uint64_t *v, size_t n)
 {
 /* count the number of set signum bits in V
  * in blocks of MAX_NP / 64U (which hopefully coincides with pfor.c's P4DSIZE)
@@ -124,14 +124,14 @@ rotmap(const uint32_t *v, size_t n)
 
 
 static size_t
-_comp(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
+_comp(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np)
 {
-	uint32_t pd[MAX_NP];
+	uint64_t pd[MAX_NP];
 	uint64_t rm = 0U;
 	size_t z = 0U;
 
 	/* deltaify */
-	xodt(pd, px, np);
+	xodt(pd, qx, np);
 	/* number of sign changes */
 	rm = rotmap(pd, np);
 	for (unsigned int b = 0U; b < 64U; b++) {
@@ -142,14 +142,14 @@ _comp(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
 	/* zigzag indicator (or flags in general) first */
 	memcpy(tgt, &rm, sizeof(rm));
 	z += sizeof(rm);
-	z += pfor_enc32(tgt + z, pd, np);
+	z += pfor_enc64(tgt + z, pd, np);
 	return z;
 }
 
 static size_t
-_dcmp(cots_px_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
+_dcmp(cots_qx_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 {
-	uint32_t pd[MAX_NP];
+	uint64_t pd[MAX_NP];
 	size_t ci = 0U;
 	uint64_t rm;
 	(void)z;
@@ -157,7 +157,7 @@ _dcmp(cots_px_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 	/* snarf flags, currently only zigzag */
 	memcpy(&rm, c, sizeof(rm));
 	ci += sizeof(rm);
-	ci += pfor_dec32(pd, c + ci, np);
+	ci += pfor_dec64(pd, c + ci, np);
 
 	/* use rotmap to unrotate things */
 	for (unsigned int b = 0U; b < 64U; b++) {
@@ -173,7 +173,7 @@ _dcmp(cots_px_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 
 /* compress */
 size_t
-comp_px(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
+comp_qx(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np)
 {
 	size_t res = 0U;
 
@@ -183,14 +183,14 @@ comp_px(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
 		const size_t mt = MAX_NP < np - i ? MAX_NP : np - i;
 
 		/* for small NP resort to dynarrs */
-		res += _comp(tgt + res, px + i, mt);
+		res += _comp(tgt + res, qx + i, mt);
 	}
 	return res;
 }
 
 /* decompress */
 size_t
-dcmp_px(cots_px_t *restrict tgt, const uint8_t *restrict c, size_t nz)
+dcmp_qx(cots_qx_t *restrict tgt, const uint8_t *restrict c, size_t nz)
 {
 	size_t ci = 0U;
 	size_t np;
@@ -207,4 +207,4 @@ dcmp_px(cots_px_t *restrict tgt, const uint8_t *restrict c, size_t nz)
 	return np;
 }
 
-/* comp-px.c ends here */
+/* comp-qx.c ends here */

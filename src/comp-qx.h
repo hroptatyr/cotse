@@ -1,4 +1,4 @@
-/*** cotse.h -- generally handy macroes
+/*** comp-qx.h -- compression routines for d64 quantities
  *
  * Copyright (C) 2014-2016 Sebastian Freundt
  *
@@ -34,48 +34,21 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ***/
-#if !defined INCLUDED_cotse_h_
-#define INCLUDED_cotse_h_
+#if !defined INCLUDED_comp_qx_h_
+#define INCLUDED_comp_qx_h_
 #include <stdint.h>
-
-/**
- * Time offset with respect to a point on the timeline (cots_tm_t).
- * Measured in nanoseconds. */
-typedef uint64_t cots_to_t;
-
-/**
- * Time, a point on the timeline. */
-typedef struct {
-	uint64_t epoch;
-} cots_tm_t;
-
-/**
- * Hash value. */
-typedef uint64_t cots_hx_t;
-
-/**
- * Price value. */
-typedef _Decimal32 cots_px_t;
-
-/**
- * Quantity value. */
-typedef _Decimal64 cots_qx_t;
-
-/**
- * Time series. */
-typedef struct {
-	/** reference time */
-	cots_tm_t reftm;
-} cots_ts_t;
+#include <stdlib.h>
+#include "cotse.h"
 
 
-/* public API */
 /**
- * Create a time series object. */
-extern cots_ts_t make_ts(void);
+ * Compress NP price values in QX into TGT, return the number of bytes. */
+extern size_t
+comp_qx(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np);
 
 /**
- * Free a time series object. */
-extern void free_ts(cots_ts_t);
+ * Decompress NZ bytes in C into price values, return number of prices. */
+extern size_t
+dcmp_qx(cots_qx_t *restrict tgt, const uint8_t *restrict c, size_t nz);
 
-#endif	/* INCLUDED_cotse_h_ */
+#endif	/* INCLUDED_comp_qx_h_ */
