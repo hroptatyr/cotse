@@ -129,9 +129,7 @@ _dcmp(cots_to_t *restrict tgt, size_t nt, const uint8_t *restrict c, size_t z)
 	size_t ci = 0U;
 	(void)z;
 
-	/* truncate nt */
-	nt = nt > MAX_NT ? MAX_NT : nt;
-
+	/* snarf average value */
 	memcpy(&avg, c, sizeof(avg));
 	ci += sizeof(avg);
 	ci += pfor_dec64(tgt, c + ci, nt);
