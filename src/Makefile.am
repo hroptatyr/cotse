@@ -21,6 +21,7 @@ SUFFIXES =
 CLEANFILES += version.c
 EXTRA_DIST += version.c.in
 
+include_HEADERS = cotse.h
 
 lib_LTLIBRARIES += libcotse.la
 libcotse_la_SOURCES = cotse.h

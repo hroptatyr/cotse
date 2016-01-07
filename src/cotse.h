@@ -1,4 +1,4 @@
-/*** cotse.h -- generally handy macroes
+/*** cotse.h -- cotse API
  *
  * Copyright (C) 2014-2016 Sebastian Freundt
  *
