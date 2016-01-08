@@ -42,6 +42,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "intern.h"
+#include "comp-ob.h"
 #include "hash.h"
 #include "nifty.h"
 
@@ -69,6 +70,20 @@ struct cots_ob_s {
 };
 
 
+static size_t
+_next_2pow(size_t z)
+{
+	z--;
+	z |= z >> 1U;
+	z |= z >> 2U;
+	z |= z >> 4U;
+	z |= z >> 8U;
+	z |= z >> 16U;
+	z |= z >> 32U;
+	z++;
+	return z;
+}
+
 static cots_mtrc_t
 make_obint(cots_ob_t ob, const char *str, size_t len)
 {
@@ -237,6 +252,115 @@ cots_mtrc_name(cots_ob_t ob, cots_mtrc_t m)
 		return NULL;
 	}
 	return (char*)ob->obs + ob->off[--m];
+}
+
+
+/* comp-ob API */
+/* compress */
+size_t
+comp_ob(uint8_t *restrict tgt, const struct cots_ob_s *restrict ob)
+{
+	const size_t off = ob->off[ob->nobs];
+	size_t res = 0U;
+
+	memcpy(tgt, &off, sizeof(off));
+	res += sizeof(off);
+
+	memcpy(tgt + res, ob->obs, off);
+	res += off;
+	return res;
+}
+
+/* decompress */
+cots_ob_t
+dcmp_ob(const uint8_t *restrict c, size_t nz)
+{
+	struct cots_ob_s res = {0UL}, *rp;
+	size_t ci = 0U;
+	size_t off;
+
+	memcpy(&off, c, sizeof(off));
+	ci += sizeof(off);
+	if (UNLIKELY(off + ci > nz)) {
+		return NULL;
+	}
+
+	/* count the number of \nul's to determine NOBS */
+	for (const uint8_t *cp = c + ci, *const ep = cp + off; cp < ep; cp++) {
+		if (UNLIKELY((cp = memchr(cp, '\0', ep - cp)) == NULL)) {
+			break;
+		}
+		res.nobs++;
+	}
+	if (UNLIKELY(!res.nobs)) {
+		return NULL;
+	}
+	/* build off array */
+	with (const size_t zoff = (((res.nobs / NOBS_MIN) + 1U) * NOBS_MIN)) {
+		const char *const obs = (const char*)(c + ci);
+
+		res.off = malloc(zoff * sizeof(*res.off));
+		if (UNLIKELY(res.off == NULL)) {
+			return NULL;
+		}
+		/* determine offsets by cumsum'ming the strlen's */
+		res.off[0U] = 0U;
+		for (size_t i = 1U; i < res.nobs; i++) {
+			res.off[i] = strlen(obs + res.off[i - 1U]) + 1U;
+		}
+	}
+	/* round up res.ztbl to next 2 power */
+	res.ztbl = _next_2pow(res.nobs);
+	/* rough estimate */
+	res.ztbl = res.ztbl > NOBS_MIN ? res.ztbl : NOBS_MIN;
+	res.tbl = calloc(res.ztbl, sizeof(*res.tbl));
+	res.ztbl--;
+
+	/* now hash them all */
+	for (size_t i = 0U; i < res.nobs; i++) {
+		const uint8_t *const obs = c + ci + res.off[i];
+		const size_t len = res.off[i + 1U];
+		const cots_hx_t hx = hash(obs, len);
+
+		for (size_t slot = hx & res.ztbl;;) {
+			const cots_hx_t slhx = res.tbl[slot].hx;
+
+			if (UNLIKELY(!slhx)) {
+				/* found empty slot */
+				res.tbl[slot].mc = i + 1U;
+				res.tbl[slot].hx = hx;
+			} else if (UNLIKELY(slhx != hx)) {
+				/* collision, do some resizing then */
+				if (UNLIKELY(resz_tbl(&res) < 0)) {
+					goto err_rsz;
+				}
+				continue;
+			}
+		}
+	}
+
+	/* looking brill, copy the string beef */
+	res.zobs = _next_2pow(off);
+	res.obs = malloc(res.zobs);
+	if (UNLIKELY(res.obs == NULL)) {
+		goto err_obs;
+	}
+	memcpy(res.obs, c + ci, off);
+
+	/* and now the container */
+	rp = malloc(sizeof(res));
+	if (UNLIKELY(rp == NULL)) {
+		goto err_ob;
+	}
+	*rp = res;
+	return rp;
+err_ob:
+	free(res.obs);
+err_obs:
+	free(res.tbl);
+err_rsz:
+	free(res.off);
+	return NULL;
 }
 
 /* intern.c ends here */

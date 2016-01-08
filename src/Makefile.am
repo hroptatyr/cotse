@@ -31,6 +31,7 @@ libcotse_la_SOURCES += bitpack.c bitpack.h bitpack64.h
 libcotse_la_SOURCES += comp-to.c comp-to.h
 libcotse_la_SOURCES += comp-px.c comp-px.h
 libcotse_la_SOURCES += comp-qx.c comp-qx.h
+libcotse_la_SOURCES += comp-ob.c comp-ob.h
 libcotse_la_SOURCES += hash.c hash.h
 libcotse_la_SOURCES += intern.c intern.h
 libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
