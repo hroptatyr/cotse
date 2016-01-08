@@ -275,16 +275,16 @@ dcmp_ob(const uint8_t *restrict c, size_t nz)
 {
 	struct cots_ob_s res = {0UL}, *rp;
 	size_t ci = 0U;
-	size_t off;
+	size_t tot;
 
-	memcpy(&off, c, sizeof(off));
-	ci += sizeof(off);
-	if (UNLIKELY(off + ci > nz)) {
+	memcpy(&tot, c, sizeof(tot));
+	ci += sizeof(tot);
+	if (UNLIKELY(tot + ci > nz)) {
 		return NULL;
 	}
 
 	/* count the number of \nul's to determine NOBS */
-	for (const uint8_t *cp = c + ci, *const ep = cp + off; cp < ep; cp++) {
+	for (const uint8_t *cp = c + ci, *const ep = cp + tot; cp < ep; cp++) {
 		if (UNLIKELY((cp = memchr(cp, '\0', ep - cp)) == NULL)) {
 			break;
 		}
@@ -303,8 +303,10 @@ dcmp_ob(const uint8_t *restrict c, size_t nz)
 		}
 		/* determine offsets by cumsum'ming the strlen's */
 		res.off[0U] = 0U;
-		for (size_t i = 1U; i < res.nobs; i++) {
-			res.off[i] = strlen(obs + res.off[i - 1U]) + 1U;
+		for (size_t i = 1U; i <= res.nobs; i++) {
+			const size_t off = res.off[i - 1U];
+			const size_t len = strlen(obs + off) + 1U;
+			res.off[i] = len + off;
 		}
 	}
 	/* round up res.ztbl to next 2 power */
@@ -316,9 +318,9 @@ dcmp_ob(const uint8_t *restrict c, size_t nz)
 
 	/* now hash them all */
 	for (size_t i = 0U; i < res.nobs; i++) {
-		const uint8_t *const obs = c + ci + res.off[i];
-		const size_t len = res.off[i + 1U];
-		const cots_hx_t hx = hash(obs, len);
+		const uint8_t *const str = c + ci + res.off[i];
+		const size_t len = res.off[i + 1U] - res.off[i];
+		const cots_hx_t hx = hash(str, len);
 
 		for (size_t slot = hx & res.ztbl;;) {
 			const cots_hx_t slhx = res.tbl[slot].hx;
@@ -334,16 +336,17 @@ dcmp_ob(const uint8_t *restrict c, size_t nz)
 				}
 				continue;
 			}
+			break;
 		}
 	}
 
 	/* looking brill, copy the string beef */
-	res.zobs = _next_2pow(off);
+	res.zobs = _next_2pow(tot);
 	res.obs = malloc(res.zobs);
 	if (UNLIKELY(res.obs == NULL)) {
 		goto err_obs;
 	}
-	memcpy(res.obs, c + ci, off);
+	memcpy(res.obs, c + ci, tot);
 
 	/* and now the container */
 	rp = malloc(sizeof(res));
@@ -352,6 +355,7 @@ dcmp_ob(const uint8_t *restrict c, size_t nz)
 	}
 	*rp = res;
 	return rp;
+
 err_ob:
 	free(res.obs);
 err_obs:
