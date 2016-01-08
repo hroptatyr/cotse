@@ -211,8 +211,6 @@ free_cots_ob(cots_ob_t ob)
 	return;
 }
 
-#include <stdio.h>
-
 cots_mtrc_t
 cots_intern(cots_ob_t ob, const char *str, size_t len)
 {
