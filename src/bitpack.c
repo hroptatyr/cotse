@@ -22,7 +22,7 @@
     - email    : powturbo [_AT_] gmail [_DOT_] com
 **/
 #if !defined IPPB
-#include <stdio.h>
+#include <stdlib.h>
 #include "bitpack.h"
  
 #if defined __INTEL_COMPILER
