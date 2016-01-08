@@ -1,6 +1,6 @@
-/*** cotse.h -- cotse API
+/*** intern.h -- interning system
  *
- * Copyright (C) 2014-2016 Sebastian Freundt
+ * Copyright (C) 2013-2016 Sebastian Freundt
  *
  * Author:  Sebastian Freundt <freundt@ga-group.nl>
  *
@@ -34,48 +34,38 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ***/
-#if !defined INCLUDED_cotse_h_
-#define INCLUDED_cotse_h_
+#if !defined INCLUDED_intern_h_
+#define INCLUDED_intern_h_
 #include <stdint.h>
+#include "cotse.h"
 
 /**
- * Time offset with respect to a point on the timeline (cots_tm_t).
- * Measured in nanoseconds. */
-typedef uint64_t cots_to_t;
+ * Obarray. */
+typedef struct cots_ob_s *cots_ob_t;
 
 /**
- * Time, a point on the timeline. */
-typedef struct {
-	uint64_t epoch;
-} cots_tm_t;
+ * Return the interned representation of STR of length LEN in OB. */
+extern cots_mtrc_t cots_intern(cots_ob_t ob, const char *str, size_t len);
 
 /**
- * Metric code. */
-typedef uint64_t cots_mtrc_t;
+ * Return the metric code for STR of length LEN in OB but
+ * do not intern that string. */
+extern cots_mtrc_t cots_mtrc(const char *str, size_t len);
 
 /**
- * Price value. */
-typedef _Decimal32 cots_px_t;
+ * Unintern the metric M. */
+extern void cots_unintern(cots_ob_t ob, cots_mtrc_t m);
 
 /**
- * Quantity value. */
-typedef _Decimal64 cots_qx_t;
+ * Return the string representation of a metric code. */
+extern const char *cots_mtrc_name(cots_ob_t, cots_mtrc_t);
 
 /**
- * Time series. */
-typedef struct {
-	/** reference time */
-	cots_tm_t reftm;
-} cots_ts_t;
-
-
-/* public API */
-/**
- * Create a time series object. */
-extern cots_ts_t make_ts(void);
+ * Create an obarray. */
+extern cots_ob_t make_cots_ob(void);
 
 /**
- * Free a time series object. */
-extern void free_ts(cots_ts_t);
+ * Free an obarray. */
+extern void free_cots_ob(cots_ob_t);
 
-#endif	/* INCLUDED_cotse_h_ */
+#endif	/* INCLUDED_intern_h_ */

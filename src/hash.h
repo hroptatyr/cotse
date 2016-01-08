@@ -1,4 +1,4 @@
-/*** cotse.h -- cotse API
+/*** hash.h -- hashing strings
  *
  * Copyright (C) 2014-2016 Sebastian Freundt
  *
@@ -34,48 +34,16 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ***/
-#if !defined INCLUDED_cotse_h_
-#define INCLUDED_cotse_h_
+#if !defined INCLUDED_hash_h_
+#define INCLUDED_hash_h_
 #include <stdint.h>
 
 /**
- * Time offset with respect to a point on the timeline (cots_tm_t).
- * Measured in nanoseconds. */
-typedef uint64_t cots_to_t;
+ * Hash value. */
+typedef uint64_t cots_hx_t;
 
 /**
- * Time, a point on the timeline. */
-typedef struct {
-	uint64_t epoch;
-} cots_tm_t;
+ * Return a hash (with the hash function du jour) of STR of size LEN. */
+extern cots_hx_t hash(const void *str, size_t len);
 
-/**
- * Metric code. */
-typedef uint64_t cots_mtrc_t;
-
-/**
- * Price value. */
-typedef _Decimal32 cots_px_t;
-
-/**
- * Quantity value. */
-typedef _Decimal64 cots_qx_t;
-
-/**
- * Time series. */
-typedef struct {
-	/** reference time */
-	cots_tm_t reftm;
-} cots_ts_t;
-
-
-/* public API */
-/**
- * Create a time series object. */
-extern cots_ts_t make_ts(void);
-
-/**
- * Free a time series object. */
-extern void free_ts(cots_ts_t);
-
-#endif	/* INCLUDED_cotse_h_ */
+#endif	/* INCLUDED_hash_h_ */
