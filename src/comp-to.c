@@ -53,20 +53,22 @@ avgt(const cots_to_t *t, size_t nt)
 {
 /* return most prominent t-delta */
 	double sum = 0.;
+	size_t k = 0U;
 
 	for (size_t i = 1U; i < nt; i++) {
 		sum += log10((double)(t[i] ?: 1ULL));
+		k += t[i] != 0U;
 	}
-	sum = exp10(sum / (double)(nt - 1U));
-	return lrint(sum);
+	sum = exp10(sum / (double)k);
+	return lrint(sum) & ~1ULL;
 }
 
 static void
 delt(cots_to_t *restrict tgt, const cots_to_t *restrict src, size_t nt)
 {
-	tgt[0U] = src[0U];
+	tgt[0U] = src[0U] & ~1ULL;
 	for (size_t i = 1U; i < nt; i++) {
-		tgt[i] = src[i] - src[i - 1U];
+		tgt[i] = (src[i] & ~1ULL) - (src[i - 1U] & ~1ULL);
 	}
 	return;
 }
@@ -84,9 +86,9 @@ static void
 rmavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg)
 {
 	for (size_t i = 0U; i < nt; i++) {
-		long int x = io[i] - avg;
+		long int x = io[i] ? (io[i] - avg) : 0;
 		/* and zig-zag encode him */
-		io[i] = (x << 1U) ^ (x >> 63);
+		io[i] = ((x << 1U) ^ (x >> 63)) ^ (io[i] == 0);
 	}
 	return;
 }
@@ -97,7 +99,7 @@ adavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg)
 	for (size_t i = 0U; i < nt; i++) {
 		/* zig-zag decode him */
 		long int x = (io[i] >> 1U) ^ (-(io[i] & 0b1U));
-		io[i] = x + avg;
+		io[i] = x + 1 ? x + avg : 0U;
 	}
 	return;
 }

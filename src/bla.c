@@ -76,7 +76,7 @@ push(const char *line, size_t UNUSED(llen))
 static void
 pr(void)
 {
-#if 0
+#if 1
 	cots_to_t last = 0U;
 
 	for (size_t i = 0U; i < 4U; i++) {
@@ -98,7 +98,7 @@ pr(void)
 static void
 prpx(void)
 {
-#if 0
+#if 1
 	char sp[32U];
 	for (size_t i = 0U; i < 4U; i++) {
 		d32tostr(sp, sizeof(sp), bids[i]);
@@ -169,7 +169,7 @@ main(int argc, char *argv[])
 		push(line, nrd);
 
 		if (nthem >= countof(them)) {
-#if 0
+#if 1
 			size_t z = comp_to(data, them, countof(them));
 			size_t n;
 
