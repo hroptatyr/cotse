@@ -29,7 +29,7 @@ push(const char *line, size_t UNUSED(llen))
 	long unsigned int s, x;
 	cots_px_t b;
 	cots_qx_t q;
-	cots_mtrc_t m;
+	cots_tag_t m;
 
 	if (line[20U] != '\t') {
 		return;

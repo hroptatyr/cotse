@@ -49,7 +49,7 @@
 #define MAX_NM		(8192U)
 
 static void
-xodt(uint64_t *restrict tgt, const cots_mtrc_t *restrict src, size_t nm)
+xodt(uint64_t *restrict tgt, const cots_tag_t *restrict src, size_t nm)
 {
 	tgt[0U] = src[0U];
 	for (size_t i = 1U; i < nm; i++) {
@@ -64,7 +64,7 @@ xodt(uint64_t *restrict tgt, const cots_mtrc_t *restrict src, size_t nm)
 }
 
 static void
-xort(cots_mtrc_t *restrict tgt, const uint64_t *restrict src, size_t nm)
+xort(cots_tag_t *restrict tgt, const uint64_t *restrict src, size_t nm)
 {
 	uint64_t sum = 0U;
 
@@ -78,7 +78,7 @@ xort(cots_mtrc_t *restrict tgt, const uint64_t *restrict src, size_t nm)
 
 
 static size_t
-_comp(uint8_t *restrict tgt, const cots_mtrc_t *restrict qx, size_t nm)
+_comp(uint8_t *restrict tgt, const cots_tag_t *restrict qx, size_t nm)
 {
 	uint64_t pd[MAX_NM];
 	size_t z = 0U;
@@ -90,7 +90,7 @@ _comp(uint8_t *restrict tgt, const cots_mtrc_t *restrict qx, size_t nm)
 }
 
 static size_t
-_dcmp(cots_mtrc_t *restrict tgt, size_t nm, const uint8_t *restrict c, size_t z)
+_dcmp(cots_tag_t *restrict tgt, size_t nm, const uint8_t *restrict c, size_t z)
 {
 	uint64_t pd[MAX_NM];
 	size_t ci = 0U;
@@ -105,7 +105,7 @@ _dcmp(cots_mtrc_t *restrict tgt, size_t nm, const uint8_t *restrict c, size_t z)
 
 /* compress */
 size_t
-comp_mtrc(uint8_t *restrict tgt, const cots_mtrc_t *restrict m, size_t nm)
+comp_tag(uint8_t *restrict tgt, const cots_tag_t *restrict m, size_t nm)
 {
 	size_t res = 0U;
 
@@ -122,7 +122,7 @@ comp_mtrc(uint8_t *restrict tgt, const cots_mtrc_t *restrict m, size_t nm)
 
 /* decompress */
 size_t
-dcmp_mtrc(cots_mtrc_t *restrict tgt, const uint8_t *restrict c, size_t nz)
+dcmp_tag(cots_tag_t *restrict tgt, const uint8_t *restrict c, size_t nz)
 {
 	size_t ci = 0U;
 	size_t nm;

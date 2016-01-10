@@ -45,20 +45,20 @@ typedef struct cots_ob_s *cots_ob_t;
 
 /**
  * Return the interned representation of STR of length LEN in OB. */
-extern cots_mtrc_t cots_intern(cots_ob_t ob, const char *str, size_t len);
+extern cots_tag_t cots_intern(cots_ob_t ob, const char *str, size_t len);
 
 /**
  * Return the metric code for STR of length LEN in OB but
  * do not intern that string. */
-extern cots_mtrc_t cots_mtrc(const char *str, size_t len);
+extern cots_tag_t cots_tag(const char *str, size_t len);
 
 /**
  * Unintern the metric M. */
-extern void cots_unintern(cots_ob_t ob, cots_mtrc_t m);
+extern void cots_unintern(cots_ob_t ob, cots_tag_t m);
 
 /**
  * Return the string representation of a metric code. */
-extern const char *cots_mtrc_name(cots_ob_t, cots_mtrc_t);
+extern const char *cots_tag_name(cots_ob_t, cots_tag_t);
 
 /**
  * Create an obarray. */

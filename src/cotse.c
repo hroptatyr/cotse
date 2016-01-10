@@ -52,10 +52,10 @@
 
 
 int
-cots_push(cots_ts_t s, cots_mtrc_t m, cots_to_t t, ...)
+cots_push(cots_ts_t s, cots_tag_t m, cots_to_t t, ...)
 {
 	static cots_to_t toff[NSAMP];
-	static cots_mtrc_t mtrs[NSAMP];
+	static cots_tag_t mtrs[NSAMP];
 	static cots_px_t prcs[NSAMP];
 	static cots_qx_t qtys[NSAMP];
 	static size_t isamp;
@@ -75,7 +75,7 @@ cots_push(cots_ts_t s, cots_mtrc_t m, cots_to_t t, ...)
 		z = comp_to(data, toff, countof(toff));
 		fprintf(stderr, "toff %zu -> %zu\n", sizeof(toff), z);
 
-		z = comp_mtrc(data, mtrs, countof(mtrs));
+		z = comp_tag(data, mtrs, countof(mtrs));
 		fprintf(stderr, "mtrs %zu -> %zu\n", sizeof(mtrs), z);
 
 		z = comp_px(data, prcs, countof(prcs));

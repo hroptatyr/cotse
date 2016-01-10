@@ -57,7 +57,7 @@ struct cots_ob_s {
 	/* beef table */
 	size_t ztbl;
 	struct {
-		cots_mtrc_t mc;
+		cots_tag_t mc;
 		cots_hx_t hx;
 	} *tbl;
 
@@ -84,7 +84,7 @@ _next_2pow(size_t z)
 	return z;
 }
 
-static cots_mtrc_t
+static cots_tag_t
 make_obint(cots_ob_t ob, const char *str, size_t len)
 {
 /* put STR (of length LEN) into string obarray, don't check for dups */
@@ -211,7 +211,7 @@ free_cots_ob(cots_ob_t ob)
 	return;
 }
 
-cots_mtrc_t
+cots_tag_t
 cots_intern(cots_ob_t ob, const char *str, size_t len)
 {
 	if (UNLIKELY(!len)) {
@@ -227,7 +227,7 @@ cots_intern(cots_ob_t ob, const char *str, size_t len)
 
 		if (UNLIKELY(!slhx)) {
 			/* found empty slot */
-			const cots_mtrc_t mc = make_obint(ob, str, len);
+			const cots_tag_t mc = make_obint(ob, str, len);
 			ob->tbl[slot].mc = mc;
 			ob->tbl[slot].hx = hx;
 		} else if (UNLIKELY(slhx != hx)) {
@@ -244,7 +244,7 @@ cots_intern(cots_ob_t ob, const char *str, size_t len)
 }
 
 const char*
-cots_mtrc_name(cots_ob_t ob, cots_mtrc_t m)
+cots_tag_name(cots_ob_t ob, cots_tag_t m)
 {
 	if (UNLIKELY(!m || ob->nobs < m)) {
 		return NULL;

@@ -45,12 +45,12 @@
 /**
  * Compress NM metric codes M into TGT, return the number of bytes. */
 extern size_t
-comp_mtrc(uint8_t *restrict tgt, const cots_mtrc_t *restrict m, size_t nm);
+comp_tag(uint8_t *restrict tgt, const cots_tag_t *restrict m, size_t nm);
 
 /**
  * Decompress NZ bytes in C into metric codes, return number of codes. */
 extern size_t
-dcmp_mtrc(cots_mtrc_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_tag(cots_tag_t *restrict tgt, const uint8_t *restrict c, size_t nz);
 
 /**
  * Compress obarray OB into TGT, return the number of bytes. */

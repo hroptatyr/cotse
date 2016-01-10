@@ -50,8 +50,8 @@ typedef struct {
 } cots_tm_t;
 
 /**
- * Metric code. */
-typedef uint64_t cots_mtrc_t;
+ * Tag code. */
+typedef uint64_t cots_tag_t;
 
 /**
  * Price value. */
@@ -80,7 +80,10 @@ extern void free_ts(cots_ts_t);
 
 
 /**
- * Push data sample to series. */
-extern int cots_push(cots_ts_t, cots_mtrc_t, cots_to_t, ...);
+ * Push data sample to series.
+ * Use TAG argument to tag this sample.
+ * Use TO parameter to record time offset.
+ * Optional arguments should coincide with the layout of the timeseries. */
+extern int cots_push(cots_ts_t, cots_tag_t, cots_to_t, ...);
 
 #endif	/* INCLUDED_cotse_h_ */
