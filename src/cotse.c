@@ -1,4 +1,4 @@
-/*** cotse.h -- cotse API
+/*** cotse.c -- cotse API
  *
  * Copyright (C) 2014-2016 Sebastian Freundt
  *
@@ -34,53 +34,59 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ***/
-#if !defined INCLUDED_cotse_h_
-#define INCLUDED_cotse_h_
-#include <stdint.h>
+#if defined HAVE_CONFIG_H
+# include "config.h"
+#endif	/* HAVE_CONFIG_H */
+#include <stdarg.h>
+#include <stdlib.h>
+#include "cotse.h"
+#include "comp-to.h"
+#include "comp-px.h"
+#include "comp-qx.h"
+#include "comp-ob.h"
+#include "nifty.h"
 
-/**
- * Time offset with respect to a point on the timeline (cots_tm_t).
- * Measured in nanoseconds. */
-typedef uint64_t cots_to_t;
+#include <stdio.h>
 
-/**
- * Time, a point on the timeline. */
-typedef struct {
-	uint64_t epoch;
-} cots_tm_t;
-
-/**
- * Metric code. */
-typedef uint64_t cots_mtrc_t;
-
-/**
- * Price value. */
-typedef _Decimal32 cots_px_t;
-
-/**
- * Quantity value. */
-typedef _Decimal64 cots_qx_t;
-
-/**
- * Time series. */
-typedef struct {
-	/** reference time */
-	cots_tm_t reftm;
-} *cots_ts_t;
+#define NSAMP		(8192U)
 
 
-/* public API */
-/**
- * Create a time series object. */
-extern cots_ts_t make_ts(void);
+int
+cots_push(cots_ts_t s, cots_mtrc_t m, cots_to_t t, ...)
+{
+	static cots_to_t toff[NSAMP];
+	static cots_mtrc_t mtrs[NSAMP];
+	static cots_px_t prcs[NSAMP];
+	static cots_qx_t qtys[NSAMP];
+	static size_t isamp;
+	va_list vap;
 
-/**
- * Free a time series object. */
-extern void free_ts(cots_ts_t);
+	mtrs[isamp] = m;
+	toff[isamp] = t;
+	va_start(vap, t);
+	prcs[isamp] = va_arg(vap, cots_px_t);
+	qtys[isamp] = va_arg(vap, cots_qx_t);
+	va_end(vap);
 
+	if (UNLIKELY(++isamp == countof(toff))) {
+		static uint8_t data[sizeof(toff)];
+		size_t z;
 
-/**
- * Push data sample to series. */
-extern int cots_push(cots_ts_t, cots_mtrc_t, cots_to_t, ...);
+		z = comp_to(data, toff, countof(toff));
+		fprintf(stderr, "toff %zu -> %zu\n", sizeof(toff), z);
 
-#endif	/* INCLUDED_cotse_h_ */
+		z = comp_mtrc(data, mtrs, countof(mtrs));
+		fprintf(stderr, "mtrs %zu -> %zu\n", sizeof(mtrs), z);
+
+		z = comp_px(data, prcs, countof(prcs));
+		fprintf(stderr, "prcs %zu -> %zu\n", sizeof(prcs), z);
+
+		z = comp_qx(data, qtys, countof(qtys));
+		fprintf(stderr, "qtys %zu -> %zu\n", sizeof(qtys), z);
+
+		isamp = 0U;
+	}
+	return 0;
+}
+
+/* cotse.c ends here */
