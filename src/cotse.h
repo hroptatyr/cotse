@@ -63,25 +63,55 @@ typedef _Decimal64 cots_qx_t;
 
 /**
  * Time series. */
-typedef struct {
+typedef struct cots_ts_s {
 	/** reference time */
 	cots_tm_t reftm;
+	/** layout (for reference), nul-terminated
+	 * Each character represents one field type,
+	 * see COTS_LO_* definitions for details.
+	 * Unsupported field types will be ignored. */
+	const char *layout;
+	/**
+	 * Field names for documentation purposed, NULL terminated. */
+	const char **fields;
 } *cots_ts_t;
+
+/* layout values */
+#define COTS_LO_END	'\0'
+#define COTS_LO_BYT	'b'
+#define COTS_LO_PRC	'p'
+#define COTS_LO_QTY	'q'
+#define COTS_LO_FLT	'f'
+#define COTS_LO_DBL	'd'
+
+/**
+ * User facing tick type.
+ * This should be extended by the API user in accordance with the layout. */
+struct cots_tick_s {
+	cots_to_t toff;
+	cots_tag_t tag;
+	char value[];
+};
 
 
 /* public API */
 /**
- * Create a time series object. */
-extern cots_ts_t make_ts(void);
+ * Create a time series object.
+ * For LAYOUT parameter see description of LAYOUT slot for cots_ts_t. */
+extern cots_ts_t make_cots_ts(const char *layout);
 
 /**
  * Free a time series object. */
-extern void free_ts(cots_ts_t);
+extern void free_cots_ts(cots_ts_t);
 
 
 /**
- * Push data sample to series.
- * Use TAG argument to tag this sample.
+ * Return tag representation of STR (of length LEN). */
+extern cots_tag_t cots_tag(cots_ts_t, const char *str, size_t len);
+
+
+/**
+ * Write data tick to series.
  * Use TO parameter to record time offset.
  * Optional arguments should coincide with the layout of the timeseries. */
 extern int cots_push(cots_ts_t, cots_tag_t, cots_to_t, ...);

@@ -37,20 +37,70 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
+#include <unistd.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 #include "cotse.h"
 #include "comp-to.h"
 #include "comp-px.h"
 #include "comp-qx.h"
 #include "comp-ob.h"
+#include "intern.h"
 #include "nifty.h"
 
 #include <stdio.h>
 
 #define NSAMP		(8192U)
 
+struct _ts_s {
+	struct cots_ts_s public;
+	size_t nfields;
+	cots_ob_t obarray;
+};
+
+static const char nul_layout[] = "";
+
 
+/* public API */
+cots_ts_t
+make_cots_ts(const char *layout)
+{
+	struct _ts_s *res = calloc(1, sizeof(*res));
+
+	if (LIKELY(layout != NULL)) {
+		res->public.layout = strdup(layout);
+	} else {
+		res->public.layout = nul_layout;
+	}
+
+	res->nfields = 1U/*to*/ + 1U/*tag*/ + strlen(res->public.layout);
+	res->obarray = make_cots_ob();
+	return (cots_ts_t)res;
+}
+
+void
+free_cots_ts(cots_ts_t ts)
+{
+	struct _ts_s *_ts = (void*)ts;
+
+	if (LIKELY(_ts->public.layout != nul_layout)) {
+		free(deconst(_ts->public.layout));
+	}
+	free_cots_ob(_ts->obarray);
+	free(_ts);
+	return;
+}
+
+
+cots_tag_t
+cots_tag(cots_ts_t s, const char *str, size_t len)
+{
+	struct _ts_s *_s = (void*)s;
+	return cots_intern(_s->obarray, str, len);
+}
+
+
 int
 cots_push(cots_ts_t s, cots_tag_t m, cots_to_t t, ...)
 {
