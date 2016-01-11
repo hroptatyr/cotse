@@ -56,13 +56,13 @@ push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 	if (*++on != '\t') {
 		b = strtopx(on, &on);
 	} else {
-		b = COTS_PX_MISS;
+		b = COTS_PX_MISS.d32;
 	}
 
 	if (*++on != '\n') {
 		q = strtoqx(on, &on);
 	} else {
-		q = COTS_QX_MISS;
+		q = COTS_QX_MISS.d64;
 	}
 	return (struct samp_s){{s, m}, b, q};
 }

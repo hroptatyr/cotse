@@ -65,13 +65,13 @@ typedef _Decimal64 cots_qx_t;
  * Special value (-0) to denote missing px data.
  * Using this instead of NaN will ensure good compaction. */
 #define COTS_PX_MISS						\
-	(volatile union {uint32_t v; _Decimal32 p;}){0x80000000U}.p
+	(union {uint32_t u32; _Decimal32 d32;}){0x80000000U}
 
 /**
  * Special value (-0) to denote missing px data.
  * Using this instead of NaN will ensure good compaction. */
 #define COTS_QX_MISS							\
-	(volatile union {uint64_t v; _Decimal64 p;}){0x8000000000000000ULL}.p
+	(union {uint64_t u64; _Decimal64 d64;}){0x8000000000000000ULL}
 
 
 /**
