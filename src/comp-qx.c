@@ -43,7 +43,6 @@
 #include "cotse.h"
 #include "comp-qx.h"
 #include "pfor.h"
-#include "dfp754_d64.h"
 #include "nifty.h"
 
 /* this should be at most 64U * P4DSIZE (cf. pfor.c)
@@ -53,29 +52,23 @@
 
 
 static void
-xodt(uint64_t *restrict tgt, const cots_qx_t *restrict src, size_t np)
+xodt(uint64_t *restrict tgt, const uint64_t *restrict src, size_t np)
 {
-	tgt[0U] = bits64(src[0U]);
+	tgt[0U] = src[0U];
 	for (size_t i = 1U; i < np; i++) {
-		uint64_t x = 0U;
 		/* delta */
-		x ^= bits64(src[i - 1U]);
-		x ^= bits64(src[i]);
-		/* and store */
-		tgt[i] = x;
+		tgt[i] = src[i - 1U] ^ src[i];
 	}
 	return;
 }
 
 static void
-xort(cots_qx_t *restrict tgt, const uint64_t *restrict src, size_t np)
+xort(uint64_t *restrict tgt, const uint64_t *restrict src, size_t np)
 {
-	uint64_t sum = 0U;
-
-	for (size_t i = 0U; i < np; i++) {
+	tgt[0U] = src[0U];
+	for (size_t i = 1U; i < np; i++) {
 		/* sum up */
-		sum ^= src[i];
-		tgt[i] = bobs64(sum);
+		tgt[i] = tgt[i - 1U] ^ src[i];
 	}
 	return;
 }
@@ -124,7 +117,7 @@ rotmap(const uint64_t *v, size_t n)
 
 
 static size_t
-_comp(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np)
+_comp(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np)
 {
 	uint64_t pd[MAX_NP];
 	uint64_t rm = 0U;
@@ -147,7 +140,7 @@ _comp(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np)
 }
 
 static size_t
-_dcmp(cots_qx_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
+_dcmp(uint64_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 {
 	uint64_t pd[MAX_NP];
 	size_t ci = 0U;
@@ -173,7 +166,7 @@ _dcmp(cots_qx_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 
 /* compress */
 size_t
-comp_qx(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np)
+comp_qx(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np)
 {
 	size_t res = 0U;
 
@@ -190,7 +183,7 @@ comp_qx(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np)
 
 /* decompress */
 size_t
-dcmp_qx(cots_qx_t *restrict tgt, const uint8_t *restrict c, size_t nz)
+dcmp_qx(uint64_t *restrict tgt, const uint8_t *restrict c, size_t nz)
 {
 	size_t ci = 0U;
 	size_t np;

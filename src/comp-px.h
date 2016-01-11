@@ -42,13 +42,14 @@
 
 
 /**
- * Compress NP price values in PX into TGT, return the number of bytes. */
+ * Compress NP price values in PX into TGT, return the number of bytes.
+ * PX can be either float (as in _Float32_t) or _Decimal32. */
 extern size_t
-comp_px(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np);
+comp_px(uint8_t *restrict tgt, const uint32_t *restrict px, size_t np);
 
 /**
  * Decompress NZ bytes in C into price values, return number of prices. */
 extern size_t
-dcmp_px(cots_px_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_px(uint32_t *restrict tgt, const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_px_h_ */

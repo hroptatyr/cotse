@@ -42,13 +42,14 @@
 
 
 /**
- * Compress NP price values in QX into TGT, return the number of bytes. */
+ * Compress NP price values in QX into TGT, return the number of bytes.
+ * QX can be either double (as in _Float64_t) or _Decimal64. */
 extern size_t
-comp_qx(uint8_t *restrict tgt, const cots_qx_t *restrict qx, size_t np);
+comp_qx(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np);
 
 /**
  * Decompress NZ bytes in C into price values, return number of prices. */
 extern size_t
-dcmp_qx(cots_qx_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_qx(uint64_t *restrict tgt, const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_qx_h_ */

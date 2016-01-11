@@ -43,7 +43,6 @@
 #include "cotse.h"
 #include "comp-px.h"
 #include "pfor.h"
-#include "dfp754_d32.h"
 #include "nifty.h"
 
 /* this should be at most 64U * P4DSIZE (cf. pfor.c)
@@ -53,29 +52,23 @@
 
 
 static void
-xodt(uint32_t *restrict tgt, const cots_px_t *restrict src, size_t np)
+xodt(uint32_t *restrict tgt, const uint32_t *restrict src, size_t np)
 {
-	tgt[0U] = bits32(src[0U]);
+	tgt[0U] = src[0U];
 	for (size_t i = 1U; i < np; i++) {
-		uint32_t x = 0U;
 		/* delta */
-		x ^= bits32(src[i - 1U]);
-		x ^= bits32(src[i]);
-		/* and store */
-		tgt[i] = x;
+		tgt[i] = src[i - 1U] ^ src[i];
 	}
 	return;
 }
 
 static void
-xort(cots_px_t *restrict tgt, const uint32_t *restrict src, size_t np)
+xort(uint32_t *restrict tgt, const uint32_t *restrict src, size_t np)
 {
-	uint32_t sum = 0U;
-
-	for (size_t i = 0U; i < np; i++) {
+	tgt[0U] = src[0U];
+	for (size_t i = 1U; i < np; i++) {
 		/* sum up */
-		sum ^= src[i];
-		tgt[i] = bobs32(sum);
+		tgt[i] = tgt[i - 1U] ^ src[i];
 	}
 	return;
 }
@@ -124,7 +117,7 @@ rotmap(const uint32_t *v, size_t n)
 
 
 static size_t
-_comp(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
+_comp(uint8_t *restrict tgt, const uint32_t *restrict px, size_t np)
 {
 	uint32_t pd[MAX_NP];
 	uint64_t rm = 0U;
@@ -147,7 +140,7 @@ _comp(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
 }
 
 static size_t
-_dcmp(cots_px_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
+_dcmp(uint32_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 {
 	uint32_t pd[MAX_NP];
 	size_t ci = 0U;
@@ -173,7 +166,7 @@ _dcmp(cots_px_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 
 /* compress */
 size_t
-comp_px(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
+comp_px(uint8_t *restrict tgt, const uint32_t *restrict px, size_t np)
 {
 	size_t res = 0U;
 
@@ -190,7 +183,7 @@ comp_px(uint8_t *restrict tgt, const cots_px_t *restrict px, size_t np)
 
 /* decompress */
 size_t
-dcmp_px(cots_px_t *restrict tgt, const uint8_t *restrict c, size_t nz)
+dcmp_px(uint32_t *restrict tgt, const uint8_t *restrict c, size_t nz)
 {
 	size_t ci = 0U;
 	size_t np;
