@@ -59,9 +59,68 @@ struct _ts_s {
 	char *fields;
 
 	cots_ob_t obarray;
+
+	/* scratch array, row wise and column wise */
+	uint64_t *row_scratch;
+	size_t j;
+
+	/* provision for NSAMP timestamps and tags */
+	cots_to_t t[NSAMP];
+	cots_tag_t m[NSAMP];
 };
 
 static const char nul_layout[] = "";
+
+
+static void
+_evict_scratch(struct _ts_s *_s)
+{
+	const size_t nflds = _s->public.nfields;
+	size_t z;
+
+	z = comp_to((uint8_t*)_s->t, _s->t, _s->j);
+	fprintf(stderr, "toff %zu -> %zu\n", _s->j * sizeof(*_s->t), z);
+
+	z = comp_tag((uint8_t*)_s->m, _s->m, _s->j);
+	fprintf(stderr, "mtrs %zu -> %zu\n", _s->j * sizeof(*_s->t), z);
+
+	/* columnarise */
+	for (size_t i = 0U; i < nflds; i++) {
+		switch (_s->public.layout[i]) {
+			uint64_t _col[NSAMP + NSAMP / 2U];
+
+		case COTS_LO_PRC:
+		case COTS_LO_FLT: {
+			uint32_t *c = (void*)_col;
+			for (size_t j = 0U; j < _s->j; j++) {
+				c[j] = _s->row_scratch[j * nflds + i];
+			}
+
+			z = comp_px((uint8_t*)c, c, _s->j);
+			fprintf(stderr, "prcs %zu -> %zu\n",
+				_s->j * sizeof(*c), z);
+			break;
+		}
+		case COTS_LO_QTY:
+		case COTS_LO_DBL: {
+			uint64_t *c = (void*)_col;
+			for (size_t j = 0U; j < _s->j; j++) {
+				c[j] = _s->row_scratch[j * nflds + i];
+			}
+
+			z = comp_qx((uint8_t*)c, c, _s->j);
+			fprintf(stderr, "qtys %zu -> %zu\n",
+				_s->j * sizeof(*c), z);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	_s->j = 0U;
+	return;
+}
 
 
 /* public API */
@@ -79,6 +138,8 @@ make_cots_ts(const char *layout)
 	with (size_t nflds = strlen(res->public.layout)) {
 		void *nfp = deconst(&res->public.nfields);
 		memcpy(nfp, &nflds, sizeof(nflds));
+
+		res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
 	}
 	res->obarray = make_cots_ob();
 	return (cots_ts_t)res;
@@ -95,6 +156,9 @@ free_cots_ts(cots_ts_t ts)
 	if (_ts->public.fields != NULL) {
 		free(deconst(_ts->public.fields));
 		free(_ts->fields);
+	}
+	if (LIKELY(_ts->row_scratch != NULL)) {
+		free(_ts->row_scratch);
 	}
 	free_cots_ob(_ts->obarray);
 	free(_ts);
@@ -163,23 +227,22 @@ cots_put_fields(cots_ts_t s, const char **fields)
 int
 cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 {
-	static cots_to_t toff[NSAMP];
-	static cots_tag_t mtrs[NSAMP];
-	static cots_px_t prcs[NSAMP];
-	static cots_qx_t qtys[NSAMP];
-	static size_t isamp;
+	struct _ts_s *_s = (void*)s;
 	va_list vap;
 
-	toff[isamp] = t;
-	mtrs[isamp] = m;
+	_s->t[_s->j] = t;
+	_s->m[_s->j] = m;
 	va_start(vap, m);
-	for (const char *lp = s->layout; *lp; lp++) {
-		switch (*lp) {
-		case 'p':
-			prcs[isamp] = va_arg(vap, cots_px_t);
+	for (size_t i = 0U, n = _s->public.nfields,
+		     row = _s->j * n; i < n; i++) {
+		switch (_s->public.layout[i]) {
+		case COTS_LO_PRC:
+		case COTS_LO_FLT:
+			_s->row_scratch[row + i] = va_arg(vap, uint32_t);
 			break;
-		case 'q':
-			qtys[isamp] = va_arg(vap, cots_qx_t);
+		case COTS_LO_QTY:
+		case COTS_LO_DBL:
+			_s->row_scratch[row + i] = va_arg(vap, uint64_t);
 			break;
 		default:
 			break;
@@ -187,23 +250,9 @@ cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 	}
 	va_end(vap);
 
-	if (UNLIKELY(++isamp == countof(toff))) {
-		static uint8_t data[sizeof(toff)];
-		size_t z;
-
-		z = comp_to(data, toff, countof(toff));
-		fprintf(stderr, "toff %zu -> %zu\n", sizeof(toff), z);
-
-		z = comp_tag(data, mtrs, countof(mtrs));
-		fprintf(stderr, "mtrs %zu -> %zu\n", sizeof(mtrs), z);
-
-		z = comp_px(data, prcs, countof(prcs));
-		fprintf(stderr, "prcs %zu -> %zu\n", sizeof(prcs), z);
-
-		z = comp_qx(data, qtys, countof(qtys));
-		fprintf(stderr, "qtys %zu -> %zu\n", sizeof(qtys), z);
-
-		isamp = 0U;
+	if (UNLIKELY(++_s->j == NSAMP)) {
+		/* auto-eviction */
+		_evict_scratch(_s);
 	}
 	return 0;
 }
@@ -211,40 +260,18 @@ cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 int
 cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 {
-	static uint64_t vals[NSAMP * 4U];
-	static size_t isamp;
 	struct _ts_s *_s = (void*)s;
-	const size_t nflds = _s->public.nfields + 2U;
+	const size_t nflds = _s->public.nfields;
 
-	memcpy(vals + nflds * isamp, data, nflds * sizeof(*vals));
-	if (UNLIKELY(++isamp == NSAMP)) {
-		static uint8_t page[sizeof(vals)];
-		cots_to_t t[NSAMP];
-		cots_tag_t m[NSAMP];
-		uint32_t p[NSAMP];
-		uint64_t q[NSAMP];
-		size_t z;
+	_s->t[_s->j] = data->toff;
+	_s->m[_s->j] = data->tag;
 
-		for (size_t i = 0U; i < NSAMP; i++) {
-			t[i] = vals[nflds * i + 0U];
-			m[i] = vals[nflds * i + 1U];
-			p[i] = (uint32_t)vals[nflds * i + 2U];
-			q[i] = vals[nflds * i + 3U];
-		}
+	memcpy(&_s->row_scratch[_s->j * nflds],
+	       data->value, nflds * sizeof(uint64_t));
 
-		z = comp_to(page, t, countof(t));
-		fprintf(stderr, "toff %zu -> %zu\n", sizeof(t), z);
-
-		z = comp_tag(page, m, countof(m));
-		fprintf(stderr, "mtrs %zu -> %zu\n", sizeof(m), z);
-
-		z = comp_px(page, p, countof(p));
-		fprintf(stderr, "prcs %zu -> %zu\n", sizeof(p), z);
-
-		z = comp_qx(page, q, countof(q));
-		fprintf(stderr, "qtys %zu -> %zu\n", sizeof(q), z);
-
-		isamp = 0U;
+	if (UNLIKELY(++_s->j == NSAMP)) {
+		/* auto-eviction */
+		_evict_scratch(_s);
 	}
 	return 0;
 }
