@@ -150,6 +150,9 @@ free_cots_ts(cots_ts_t ts)
 {
 	struct _ts_s *_ts = (void*)ts;
 
+	if (UNLIKELY(_ts->j)) {
+		_evict_scratch(_ts);
+	}
 	if (LIKELY(_ts->public.layout != nul_layout)) {
 		free(deconst(_ts->public.layout));
 	}
