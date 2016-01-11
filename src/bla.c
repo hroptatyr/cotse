@@ -6,11 +6,7 @@
 #include <math.h>
 #include "dfp754_d32.h"
 #include "dfp754_d64.h"
-#include "comp-to.h"
-#include "comp-px.h"
-#include "comp-qx.h"
-#include "comp-ob.h"
-#include "intern.h"
+#include "cotse.h"
 #include "nifty.h"
 
 #define NSECS	(1000000000UL)
@@ -20,10 +16,14 @@
 #define strtopx		strtod32
 #define strtoqx		strtod64
 
-static cots_ob_t obar;
+struct samp_s {
+	struct cots_tick_s proto;
+	cots_px_t b;
+	cots_qx_t q;
+};
 
-static void
-push(const char *line, size_t UNUSED(llen))
+static struct samp_s
+push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 {
 	char *on;
 	long unsigned int s, x;
@@ -32,13 +32,13 @@ push(const char *line, size_t UNUSED(llen))
 	cots_tag_t m;
 
 	if (line[20U] != '\t') {
-		return;
+		return (struct samp_s){{0U, 0U}};
 	} else if (!(s = strtoul(line, &on, 10))) {
-		return;
+		return (struct samp_s){{0U, 0U}};
 	} else if (*on++ != '.') {
-		return;
+		return (struct samp_s){{0U, 0U}};
 	} else if ((x = strtoul(on, &on, 10), *on != '\t')) {
-		return;
+		return (struct samp_s){{0U, 0U}};
 	}
 	s = (s * NSECS + x);
 	//s /= MSECQ;
@@ -46,37 +46,45 @@ push(const char *line, size_t UNUSED(llen))
 
 	with (const char *ecn = ++on) {
 		if (UNLIKELY((on = strchr(ecn, '\t')) == NULL)) {
-			return;
-		} else if (UNLIKELY(!(m = cots_intern(obar, ecn, on - ecn)))) {
+			return (struct samp_s){{0U, 0U}};
+		} else if (UNLIKELY(!(m = cots_tag(ts, ecn, on - ecn)))) {
 			/* fuck */
-			return;
+			return (struct samp_s){{0U, 0U}};
 		}
 	}
 
 	if (*++on == '\t' || isnand32(b = strtopx(on, &on))) {
-		return;
+		return (struct samp_s){{0U, 0U}};
 	}
 
 	if (*++on == '\t' || isnand64(q = strtoqx(on, &on))) {
-		return;
+		return (struct samp_s){{0U, 0U}};
 	}
-
-	cots_push(NULL, m, s, b, q);
-	return;
+	return (struct samp_s){{s, m}, b, q};
 }
 
 int
 main(int argc, char *argv[])
 {
+	static size_t i;
 	char *line = NULL;
 	size_t llen = 0U;
+	cots_ts_t db;
 
-	obar = make_cots_ob();
+	db = make_cots_ts("pq");
 	for (ssize_t nrd; (nrd = getline(&line, &llen, stdin)) > 0;) {
-		push(line, nrd);
+		struct samp_s x = push(db, line, nrd);
+
+		if (x.proto.tag) {
+			//cots_write_va(db, x.proto.toff, x.proto.tag, x.b, x.q);
+			cots_write_tick(db, &x.proto);
+		}
+		if (++i >= 1000000) {
+			break;
+		}
 	}
 	close(STDOUT_FILENO);
 	free(line);
-	free_cots_ob(obar);
+	free_cots_ts(db);
 	return 0;
 }

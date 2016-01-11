@@ -102,7 +102,7 @@ cots_tag(cots_ts_t s, const char *str, size_t len)
 
 
 int
-cots_push(cots_ts_t s, cots_tag_t m, cots_to_t t, ...)
+cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 {
 	static cots_to_t toff[NSAMP];
 	static cots_tag_t mtrs[NSAMP];
@@ -111,11 +111,21 @@ cots_push(cots_ts_t s, cots_tag_t m, cots_to_t t, ...)
 	static size_t isamp;
 	va_list vap;
 
-	mtrs[isamp] = m;
 	toff[isamp] = t;
-	va_start(vap, t);
-	prcs[isamp] = va_arg(vap, cots_px_t);
-	qtys[isamp] = va_arg(vap, cots_qx_t);
+	mtrs[isamp] = m;
+	va_start(vap, m);
+	for (const char *lp = s->layout; *lp; lp++) {
+		switch (*lp) {
+		case 'p':
+			prcs[isamp] = va_arg(vap, cots_px_t);
+			break;
+		case 'q':
+			qtys[isamp] = va_arg(vap, cots_qx_t);
+			break;
+		default:
+			break;
+		}
+	}
 	va_end(vap);
 
 	if (UNLIKELY(++isamp == countof(toff))) {
@@ -133,6 +143,46 @@ cots_push(cots_ts_t s, cots_tag_t m, cots_to_t t, ...)
 
 		z = comp_qx(data, qtys, countof(qtys));
 		fprintf(stderr, "qtys %zu -> %zu\n", sizeof(qtys), z);
+
+		isamp = 0U;
+	}
+	return 0;
+}
+
+int
+cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
+{
+	static uint64_t vals[NSAMP * 4U];
+	static size_t isamp;
+	struct _ts_s *_s = (void*)s;
+
+	memcpy(vals + _s->nfields * isamp, data, _s->nfields * sizeof(*vals));
+	if (UNLIKELY(++isamp == NSAMP)) {
+		static uint8_t page[sizeof(vals)];
+		cots_to_t t[NSAMP];
+		cots_tag_t m[NSAMP];
+		uint32_t p[NSAMP];
+		uint64_t q[NSAMP];
+		size_t z;
+
+		for (size_t i = 0U; i < NSAMP; i++) {
+			t[i] = vals[4U * i + 0U];
+			m[i] = vals[4U * i + 1U];
+			p[i] = (uint32_t)vals[4U * i + 2U];
+			q[i] = vals[4U * i + 3U];
+		}
+
+		z = comp_to(page, t, countof(t));
+		fprintf(stderr, "toff %zu -> %zu\n", sizeof(t), z);
+
+		z = comp_tag(page, m, countof(m));
+		fprintf(stderr, "mtrs %zu -> %zu\n", sizeof(m), z);
+
+		z = comp_px(page, p, countof(p));
+		fprintf(stderr, "prcs %zu -> %zu\n", sizeof(p), z);
+
+		z = comp_qx(page, q, countof(q));
+		fprintf(stderr, "qtys %zu -> %zu\n", sizeof(q), z);
 
 		isamp = 0U;
 	}

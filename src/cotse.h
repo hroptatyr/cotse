@@ -113,7 +113,13 @@ extern cots_tag_t cots_tag(cots_ts_t, const char *str, size_t len);
 /**
  * Write data tick to series.
  * Use TO parameter to record time offset.
+ * Use TAG argument to tag this sample.
  * Optional arguments should coincide with the layout of the timeseries. */
-extern int cots_push(cots_ts_t, cots_tag_t, cots_to_t, ...);
+extern int cots_write_va(cots_ts_t, cots_to_t, cots_tag_t, ...);
+
+/**
+ * Write data tick to series.
+ * The actual length of the tick is determined by the series' layout */
+extern int cots_write_tick(cots_ts_t, const struct cots_tick_s*);
 
 #endif	/* INCLUDED_cotse_h_ */
