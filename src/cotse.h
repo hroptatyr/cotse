@@ -142,4 +142,9 @@ extern int cots_write_va(cots_ts_t, cots_to_t, cots_tag_t, ...);
  * The actual length of the tick is determined by the series' layout */
 extern int cots_write_tick(cots_ts_t, const struct cots_tick_s*);
 
+/**
+ * Write N data ticks to series.
+ * The actual length of the tick is determined by the series' layout */
+extern int cots_write_ticks(cots_ts_t, const struct cots_tick_s*, size_t n);
+
 #endif	/* INCLUDED_cotse_h_ */
