@@ -53,12 +53,16 @@ push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 		}
 	}
 
-	if (*++on == '\t' || isnand32(b = strtopx(on, &on))) {
-		return (struct samp_s){{0U, 0U}};
+	if (*++on != '\t') {
+		b = strtopx(on, &on);
+	} else {
+		b = COTS_PX_MISS;
 	}
 
-	if (*++on == '\t' || isnand64(q = strtoqx(on, &on))) {
-		return (struct samp_s){{0U, 0U}};
+	if (*++on != '\n') {
+		q = strtoqx(on, &on);
+	} else {
+		q = COTS_QX_MISS;
 	}
 	return (struct samp_s){{s, m}, b, q};
 }
