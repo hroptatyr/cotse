@@ -78,15 +78,16 @@ typedef _Decimal64 cots_qx_t;
  * Time series. */
 typedef struct cots_ts_s {
 	/** reference time */
-	cots_tm_t reftm;
+	const cots_tm_t reftm;
+	/** number of fields */
+	const size_t nfields;
 	/** layout (for reference), nul-terminated
 	 * Each character represents one field type,
 	 * see COTS_LO_* definitions for details.
 	 * Unsupported field types will be ignored. */
 	const char *layout;
-	/**
-	 * Field names for documentation purposed, NULL terminated. */
-	const char **fields;
+	/** Field names for documentation purposed, NULL terminated. */
+	const char *const *fields;
 } *cots_ts_t;
 
 /* layout values */
@@ -121,6 +122,12 @@ extern void free_cots_ts(cots_ts_t);
 /**
  * Return tag representation of STR (of length LEN). */
 extern cots_tag_t cots_tag(cots_ts_t, const char *str, size_t len);
+
+
+/**
+ * Lodge field names (for documentation purposes) with TS.
+ * An old array of fields in TS will be overwritten. */
+extern int cots_put_fields(cots_ts_t, const char **fields);
 
 
 /**

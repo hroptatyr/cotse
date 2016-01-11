@@ -55,7 +55,9 @@
 
 struct _ts_s {
 	struct cots_ts_s public;
-	size_t nfields;
+	/* compacted version of fields */
+	char *fields;
+
 	cots_ob_t obarray;
 };
 
@@ -74,7 +76,10 @@ make_cots_ts(const char *layout)
 		res->public.layout = nul_layout;
 	}
 
-	res->nfields = 1U/*to*/ + 1U/*tag*/ + strlen(res->public.layout);
+	with (size_t nflds = strlen(res->public.layout)) {
+		void *nfp = deconst(&res->public.nfields);
+		memcpy(nfp, &nflds, sizeof(nflds));
+	}
 	res->obarray = make_cots_ob();
 	return (cots_ts_t)res;
 }
@@ -87,6 +92,10 @@ free_cots_ts(cots_ts_t ts)
 	if (LIKELY(_ts->public.layout != nul_layout)) {
 		free(deconst(_ts->public.layout));
 	}
+	if (_ts->public.fields != NULL) {
+		free(deconst(_ts->public.fields));
+		free(_ts->fields);
+	}
 	free_cots_ob(_ts->obarray);
 	free(_ts);
 	return;
@@ -98,6 +107,56 @@ cots_tag(cots_ts_t s, const char *str, size_t len)
 {
 	struct _ts_s *_s = (void*)s;
 	return cots_intern(_s->obarray, str, len);
+}
+
+
+int
+cots_put_fields(cots_ts_t s, const char **fields)
+{
+	struct _ts_s *_s = (void*)s;
+	const size_t nfields = _s->public.nfields;
+	const char *const *old = _s->public.fields;
+	const char **new = calloc(nfields + 1U, sizeof(*new));
+	char *flds;
+
+	if (UNLIKELY(new == NULL)) {
+		return -1;
+	}
+	for (size_t i = 0U; i < nfields; i++) {
+		const size_t this = strlen(fields[i]);
+		const size_t prev = (uintptr_t)new[i];
+		new[i + 1U] = (void*)(uintptr_t)(prev + this + 1U/*\nul*/);
+	}
+	/* make the big compacted array */
+	with (size_t ztot = (uintptr_t)new[nfields], o = 0U) {
+		flds = calloc(ztot, sizeof(*flds));
+
+		if (UNLIKELY(flds == NULL)) {
+			free(new);
+			return -1;
+		}
+
+		/* compactify */
+		for (size_t i = 0U; i < nfields; i++) {
+			const size_t len = (uintptr_t)new[i + 1U] - o;
+			memcpy(flds + o, fields[i], len);
+			o += len;
+		}
+
+		/* update actual field pointers in new */
+		for (size_t i = 0U; i < nfields; i++) {
+			new[i] = flds + (uintptr_t)new[i];
+		}
+		new[nfields] = NULL;
+	}
+	/* swap old for new */
+	_s->public.fields = new;
+	if (UNLIKELY(old != NULL)) {
+		free(deconst(old));
+		free(_s->fields);
+	}
+	_s->fields = flds;
+	return 0;
 }
 
 
@@ -155,8 +214,9 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 	static uint64_t vals[NSAMP * 4U];
 	static size_t isamp;
 	struct _ts_s *_s = (void*)s;
+	const size_t nflds = _s->public.nfields + 2U;
 
-	memcpy(vals + _s->nfields * isamp, data, _s->nfields * sizeof(*vals));
+	memcpy(vals + nflds * isamp, data, nflds * sizeof(*vals));
 	if (UNLIKELY(++isamp == NSAMP)) {
 		static uint8_t page[sizeof(vals)];
 		cots_to_t t[NSAMP];
@@ -166,10 +226,10 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 		size_t z;
 
 		for (size_t i = 0U; i < NSAMP; i++) {
-			t[i] = vals[4U * i + 0U];
-			m[i] = vals[4U * i + 1U];
-			p[i] = (uint32_t)vals[4U * i + 2U];
-			q[i] = vals[4U * i + 3U];
+			t[i] = vals[nflds * i + 0U];
+			m[i] = vals[nflds * i + 1U];
+			p[i] = (uint32_t)vals[nflds * i + 2U];
+			q[i] = vals[nflds * i + 3U];
 		}
 
 		z = comp_to(page, t, countof(t));
