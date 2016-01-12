@@ -76,6 +76,8 @@ main(int argc, char *argv[])
 	cots_ts_t db;
 
 	db = make_cots_ts("pq");
+	cots_put_fields(db, (const char*[]){"BID", "SIZE"});
+
 	for (ssize_t nrd; (nrd = getline(&line, &llen, stdin)) > 0;) {
 		struct samp_s x = push(db, line, nrd);
 

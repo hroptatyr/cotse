@@ -42,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <fcntl.h>
 #include "cotse.h"
 #include "comp.h"
 #include "intern.h"
@@ -104,6 +105,24 @@ struct idx_page_s {
 static const char nul_layout[] = "";
 
 
+static void
+wr_hdr(const struct _ts_s *_s)
+{
+	const size_t nflds = _s->public.nfields;
+	struct fhdr_s h = {
+		"cots", "v0", 0x3c3eU, 0ULL, 0ULL, 0ULL,
+	};
+	write(STDOUT_FILENO, &h, sizeof(h));
+	write(STDOUT_FILENO, _s->public.layout, nflds + 1U);
+
+	if (_s->public.fields) {
+		const char *last = _s->public.fields[nflds - 1U];
+		size_t zfld = last + strlen(last) - _s->fields;
+		write(STDOUT_FILENO, _s->fields, zfld + 1U);
+	}
+	return;
+}
+
 static int
 _evict_scratch(struct _ts_s *_s)
 {
@@ -132,11 +151,7 @@ _evict_scratch(struct _ts_s *_s)
 	fprintf(stderr, "comp %zu  (%0.2f%%)\n", z, 100. * (double)z / (double)uncomp);
 
 	if (!_s->k) {
-		struct fhdr_s h = {
-			"cots", "v0", 0x3c3eU, 0ULL, 0ULL, 0ULL,
-		};
-		write(STDOUT_FILENO, &h, sizeof(h));
-		write(STDOUT_FILENO, _s->public.layout, nflds + 1U);
+		wr_hdr(_s);
 	};
 	/* write data */
 	write(STDOUT_FILENO, buf, z);
@@ -198,9 +213,78 @@ free_cots_ts(cots_ts_t ts)
 	if (LIKELY(_ts->row_scratch != NULL)) {
 		free(_ts->row_scratch);
 	}
-	free_cots_ob(_ts->obarray);
+	if (LIKELY(_ts->obarray != NULL)) {
+		free_cots_ob(_ts->obarray);
+	}
 	free(_ts);
 	return;
+}
+
+cots_ts_t
+cots_open_ts(const char *file, int flags)
+{
+	struct _ts_s *res;
+	struct fhdr_s hdr;
+	int fd;
+
+	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
+		return NULL;
+	}
+	/* read header bit */
+	if (read(fd, &hdr, sizeof(hdr)) < (ssize_t)sizeof(hdr)) {
+		close(fd);
+		return NULL;
+	}
+
+	if (UNLIKELY((res = calloc(1, sizeof(*res))) == NULL)) {
+		return NULL;
+	}
+	/* make backing file known */
+	res->fd = fd;
+	res->public.filename = strdup(file);
+	{
+		size_t zlay = 8U, olay = 0U;
+		char *layo = malloc(8U);
+		char *eo;
+
+		while (1) {
+			read(fd, layo + olay, zlay);
+			if ((eo = memchr(layo + olay, '\0', zlay)) != NULL) {
+				break;
+			}
+			/* otherwise double in size and retry */
+			olay = zlay;
+			layo = realloc(layo, zlay * 2U);
+		}
+		res->public.layout = layo;
+
+		with (size_t nflds = eo - layo) {
+			void *nfp = deconst(&res->public.nfields);
+			memcpy(nfp, &nflds, sizeof(nflds));
+		}
+	}
+
+	with (size_t nflds = strlen(res->public.layout)) {
+		void *nfp = deconst(&res->public.nfields);
+		memcpy(nfp, &nflds, sizeof(nflds));
+
+		res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
+	}
+
+	/* use a backing file */
+	return (cots_ts_t)res;
+}
+
+int
+cots_close_ts(cots_ts_t s)
+{
+	struct _ts_s *_s = (void*)s;
+
+	if (LIKELY(_s->fd >= 0)) {
+		close(_s->fd);
+	}
+	free_cots_ts(s);
+	return 0;
 }
 
 
@@ -312,6 +396,21 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 		_evict_scratch(_s);
 	}
 	return 0;
+}
+
+ssize_t
+cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
+{
+	struct _ts_s *_s = (void*)s;
+	size_t n = NSAMP;
+
+	tsoa->toffs = _s->t;
+	tsoa->tags = _s->m;
+
+	for (size_t i = 0U, nflds = _s->public.nfields; i < nflds; i++) {
+		tsoa->more[i] = _s->row_scratch + i * n;
+	}
+	return n;
 }
 
 /* cotse.c ends here */

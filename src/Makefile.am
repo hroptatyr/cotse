@@ -46,6 +46,10 @@ bla_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
 bla_LDFLAGS = $(AM_LDFLAGS) -lm -static
 bla_LDADD = libcotse.la
 
+noinst_PROGRAMS += cotsdump
+cotsdump_LDFLAGS = $(AM_LDFLAGS) -lm -static
+cotsdump_LDADD = libcotse.la
+
 
 ## version rules
 version.c: version.c.in $(top_builddir)/.version
