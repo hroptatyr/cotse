@@ -28,6 +28,7 @@ libcotse_la_SOURCES = cotse.c cotse.h
 libcotse_la_SOURCES += nifty.h
 libcotse_la_SOURCES += pfor.c pfor.h
 libcotse_la_SOURCES += bitpack.c bitpack.h bitpack64.h
+libcotse_la_SOURCES += comp.c comp.h
 libcotse_la_SOURCES += comp-to.c comp-to.h
 libcotse_la_SOURCES += comp-px.c comp-px.h
 libcotse_la_SOURCES += comp-qx.c comp-qx.h
