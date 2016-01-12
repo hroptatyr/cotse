@@ -41,17 +41,22 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include "cotse.h"
-#include "comp-to.h"
-#include "comp-px.h"
-#include "comp-qx.h"
-#include "comp-ob.h"
+#include "comp.h"
 #include "intern.h"
 #include "nifty.h"
 
 #include <stdio.h>
 
+#define MAP_MEM		(MAP_SHARED | MAP_ANON)
+#define PROT_MEM	(PROT_READ | PROT_WRITE)
+#ifndef MAP_ANON
+# define MAP_ANON	MAP_ANONYMOUS
+#endif	/* !MAP_ANON */
+
 #define NSAMP		(8192U)
+#define NTIDX		(512U)
 
 struct _ts_s {
 	struct cots_ts_s public;
@@ -60,66 +65,94 @@ struct _ts_s {
 
 	cots_ob_t obarray;
 
-	/* scratch array, row wise and column wise */
+	/* scratch array, row wise */
 	uint64_t *row_scratch;
 	size_t j;
 
 	/* provision for NSAMP timestamps and tags */
 	cots_to_t t[NSAMP];
 	cots_tag_t m[NSAMP];
+
+	/* currently attached file */
+	int fd;
+
+	cots_to_t tidx[NTIDX];
+	uint8_t *pidx[NTIDX];
+	size_t k;
+};
+
+struct fhdr_s {
+	uint8_t magic[4U];
+	uint8_t version[2U];
+	uint16_t endian;
+	uint64_t flags;
+	/* offset to index pages */
+	uint64_t ioff;
+	/* offset to wal */
+	uint64_t woff;
+	/* layout, \nul term'd */
+	uint8_t layout[];
+};
+
+struct idx_page_s {
+	/* time-offsets */
+	cots_to_t tidx[NTIDX];
+	/* block sizes */
+	uint32_t zblk[NTIDX];
 };
 
 static const char nul_layout[] = "";
 
 
-static void
+static int
 _evict_scratch(struct _ts_s *_s)
 {
 	const size_t nflds = _s->public.nfields;
+	const char *const layo = _s->public.layout;
+	const uint64_t *rows = _s->row_scratch;
+	const size_t zrow = (nflds + 2U) * sizeof(*_s->row_scratch);
+	const size_t bsz = zrow * 3U * _s->j / 2U;
+	uint8_t *buf;
 	size_t z;
 
-	z = comp_to((uint8_t*)_s->t, _s->t, _s->j);
-	fprintf(stderr, "toff %zu -> %zu\n", _s->j * sizeof(*_s->t), z);
-
-	z = comp_tag((uint8_t*)_s->m, _s->m, _s->j);
-	fprintf(stderr, "mtrs %zu -> %zu\n", _s->j * sizeof(*_s->t), z);
-
-	/* columnarise */
-	for (size_t i = 0U; i < nflds; i++) {
-		switch (_s->public.layout[i]) {
-			uint64_t _col[NSAMP + NSAMP / 2U];
-
-		case COTS_LO_PRC:
-		case COTS_LO_FLT: {
-			uint32_t *c = (void*)_col;
-			for (size_t j = 0U; j < _s->j; j++) {
-				c[j] = _s->row_scratch[j * nflds + i];
-			}
-
-			z = comp_px((uint8_t*)c, c, _s->j);
-			fprintf(stderr, "prcs %zu -> %zu\n",
-				_s->j * sizeof(*c), z);
-			break;
-		}
-		case COTS_LO_QTY:
-		case COTS_LO_DBL: {
-			uint64_t *c = (void*)_col;
-			for (size_t j = 0U; j < _s->j; j++) {
-				c[j] = _s->row_scratch[j * nflds + i];
-			}
-
-			z = comp_qx((uint8_t*)c, c, _s->j);
-			fprintf(stderr, "qtys %zu -> %zu\n",
-				_s->j * sizeof(*c), z);
-			break;
-		}
-		default:
-			break;
-		}
+	if (UNLIKELY(!_s->j)) {
+		return 0;
+	}
+	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
+	if (UNLIKELY(buf == MAP_FAILED)) {
+		return -1;
 	}
 
+	/* call the compactor */
+	z = comp(buf + sizeof(z), nflds, _s->j, layo, _s->t, _s->m, rows);
+	memcpy(buf, &z, sizeof(z));
+	z += sizeof(z);
+
+	size_t uncomp = _s->j * 2U * sizeof(uint64_t) + 12U * _s->j;
+	fprintf(stderr, "comp %zu  (%0.2f%%)\n", z, 100. * (double)z / (double)uncomp);
+
+	if (!_s->k) {
+		struct fhdr_s h = {
+			"cots", "v0", 0x3c3eU, 0ULL, 0ULL, 0ULL,
+		};
+		write(STDOUT_FILENO, &h, sizeof(h));
+		write(STDOUT_FILENO, _s->public.layout, nflds + 1U);
+	};
+	/* write data */
+	write(STDOUT_FILENO, buf, z);
+	fsync(STDOUT_FILENO);
+
+	/* store in index */
+	_s->tidx[_s->k + 0U] = _s->t[0U];
+	/* best effort to guess the next index's timestamp */
+	_s->tidx[_s->k + 1U] = _s->t[_s->j - 1U];
+	/* store pointer */
+	_s->pidx[_s->k + 0U] = mremap(buf, bsz, z, MREMAP_MAYMOVE);
+	_s->pidx[_s->k + 1U] = _s->pidx[_s->k + 0U] + z;
+	_s->k++;
+
 	_s->j = 0U;
-	return;
+	return -1;
 }
 
 
@@ -142,6 +175,8 @@ make_cots_ts(const char *layout)
 		res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
 	}
 	res->obarray = make_cots_ob();
+
+	/* use a backing file */
 	return (cots_ts_t)res;
 }
 

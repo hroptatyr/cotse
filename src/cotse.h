@@ -88,6 +88,8 @@ typedef struct cots_ts_s {
 	const char *layout;
 	/** Field names for documentation purposes, NULL terminated. */
 	const char *const *fields;
+	/** Currently attached file, if any. */
+	const char *filename;
 } *cots_ts_t;
 
 /* layout values */
@@ -117,6 +119,22 @@ extern cots_ts_t make_cots_ts(const char *layout);
 /**
  * Free a time series object. */
 extern void free_cots_ts(cots_ts_t);
+
+/**
+ * Attach backing FILE to series. */
+extern int cots_atch(cots_ts_t, const char *file, int flags);
+
+/**
+ * Detach files from series, if any. */
+extern int cots_dtch(cots_ts_t);
+
+/**
+ * Open a cots-ts file. */
+extern cots_ts_t open_cots_ts(const char *file, int flags);
+
+/**
+ * Close a cots-ts handle, the handle is unusable hereafter. */
+extern int clos_cots_ts(cots_ts_t);
 
 
 /**
