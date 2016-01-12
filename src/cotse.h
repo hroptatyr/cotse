@@ -86,7 +86,7 @@ typedef struct cots_ts_s {
 	 * see COTS_LO_* definitions for details.
 	 * Unsupported field types will be ignored. */
 	const char *layout;
-	/** Field names for documentation purposed, NULL terminated. */
+	/** Field names for documentation purposes, NULL terminated. */
 	const char *const *fields;
 } *cots_ts_t;
 
