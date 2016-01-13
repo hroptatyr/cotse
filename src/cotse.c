@@ -150,7 +150,11 @@ munmap_any(void *map, off_t off, size_t len)
 {
 	size_t pgsz = mmap_pgsz();
 	size_t ofi = off % pgsz;
-	return munmap((uint8_t*)map - ofi, len + ofi);
+	uint8_t *omp = (uint8_t*)map - ofi;
+
+	omp = !((uintptr_t)omp & (pgsz - 1U)) ? omp : map;
+	len = !((uintptr_t)omp & (pgsz - 1U)) ? len + ofi : len;
+	return munmap(omp, len);
 }
 
 static int
@@ -158,7 +162,11 @@ mprot_any(void *map, off_t off, size_t len, int prot)
 {
 	size_t pgsz = mmap_pgsz();
 	size_t ofi = off % pgsz;
-	return mprotect((uint8_t*)map - ofi, len + ofi, prot);
+	uint8_t *omp = (uint8_t*)map - ofi;
+
+	omp = !((uintptr_t)omp & (pgsz - 1U)) ? omp : map;
+	len = !((uintptr_t)omp & (pgsz - 1U)) ? len + ofi : len;
+	return mprotect(omp, len, prot);
 }
 
 
