@@ -311,6 +311,8 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 static int
 _flush_hdr(const struct _ts_s *_s)
 {
+	const size_t nflds = _s->public.nfields;
+
 	if (UNLIKELY(_s->fd < 0)) {
 		/* no need */
 		return 0;
@@ -320,6 +322,8 @@ _flush_hdr(const struct _ts_s *_s)
 	}
 	/* otherwise */
 	_s->mdr->ioff = htobe64(_s->root.z[_s->nidx]);
+
+	msync_any(_s->mdr, 0U, sizeof(*_s->mdr) + nflds + 1U, MS_ASYNC);
 	return 0;
 }
 
