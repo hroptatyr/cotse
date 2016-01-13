@@ -524,7 +524,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		goto clo_out;
 
 	} else {
-		/* read file's header and indices */
+		/* read file's header */
 		off_t hz = sizeof(*mdr) + s->nfields + 1U;
 
 		mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
@@ -579,6 +579,11 @@ cots_detach(cots_ts_t s)
 			_s->pidx[i] = NULL;
 		}
 	}
+	/* reset indices */
+	_s->nidx = 0U;
+	_s->root.t[0U] = 0U;
+	_s->root.z[0U] = 0U;
+
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
 		_s->public.filename = NULL;
@@ -586,6 +591,7 @@ cots_detach(cots_ts_t s)
 	if (_s->mdr) {
 		const size_t hz = sizeof(*_s->mdr) + _s->public.nfields + 1U;
 		munmap_any(_s->mdr, 0, hz);
+		_s->mdr = NULL;
 	}
 	if (_s->fd >= 0) {
 		close(_s->fd);
