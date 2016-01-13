@@ -41,7 +41,7 @@
 
 
 extern size_t
-comp(uint8_t *tgt, size_t nflds, size_t nrows, const char *layout,
-     const cots_to_t *to, const cots_tag_t *tag, const uint64_t *rows);
+comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
+     const cots_to_t *to, const cots_tag_t *tag, void *const cols[]);
 
 #endif	/* INCLUDED_comp_h_ */

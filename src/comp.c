@@ -53,8 +53,8 @@
 
 
 size_t
-comp(uint8_t *tgt, size_t nflds, size_t nrows, const char *layout,
-     const cots_to_t *to, const cots_tag_t *tag, const uint64_t *rows)
+comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
+     const cots_to_t *to, const cots_tag_t *tag, void *const cols[])
 {
 	size_t totz = 0U;
 	size_t z;
@@ -67,16 +67,12 @@ comp(uint8_t *tgt, size_t nflds, size_t nrows, const char *layout,
 	memcpy(tgt + totz, &z, sizeof(z));
 	totz += z + sizeof(z);
 
-	/* columnarise */
-	for (size_t i = 0U; i < nflds; i++) {
+	/* columns now */
+	for (size_t i = 0U; i < ncols; i++) {
 		switch (layout[i]) {
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
-			uint32_t *c = ALGN16(tgt + totz + sizeof(z));
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = rows[j * nflds + i];
-			}
+			uint32_t *c = cols[i];
 
 			z = comp_px(tgt + totz + sizeof(z), c, nrows);
 			memcpy(tgt + totz, &z, sizeof(z));
@@ -85,11 +81,7 @@ comp(uint8_t *tgt, size_t nflds, size_t nrows, const char *layout,
 		}
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
-			uint64_t *c = ALGN16(tgt + totz + sizeof(z));
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = rows[j * nflds + i];
-			}
+			uint64_t *c = cols[i];
 
 			z = comp_qx(tgt + totz + sizeof(z), c, nrows);
 			memcpy(tgt + totz, &z, sizeof(z));
