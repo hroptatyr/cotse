@@ -357,9 +357,7 @@ free_cots_ts(cots_ts_t ts)
 {
 	struct _ts_s *_ts = (void*)ts;
 
-	if (UNLIKELY(_ts->nrows)) {
-		_flush(_ts);
-	}
+	cots_detach(ts);
 	if (LIKELY(_ts->public.layout != nul_layout)) {
 		free(deconst(_ts->public.layout));
 	}
@@ -524,6 +522,9 @@ cots_detach(cots_ts_t s)
 {
 	struct _ts_s *_s = (void*)s;
 
+	if (UNLIKELY(_s->nrows)) {
+		_flush(_s);
+	}
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
 		_s->public.filename = NULL;
