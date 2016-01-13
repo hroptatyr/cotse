@@ -134,7 +134,7 @@ mmap_any(int fd, int prot, int flags, off_t off, size_t len)
 {
 	const size_t pgsz = mmap_pgsz();
 	size_t ofp = off / pgsz, ofi = off % pgsz;
-	char *p = mmap(NULL, len + ofi, prot, flags, fd, ofp * pgsz);
+	uint8_t *p = mmap(NULL, len + ofi, prot, flags, fd, ofp * pgsz);
 	return LIKELY(p != MAP_FAILED) ? p + ofi : NULL;
 }
 
@@ -143,8 +143,7 @@ munmap_any(void *map, off_t off, size_t len)
 {
 	size_t pgsz = mmap_pgsz();
 	size_t ofi = off % pgsz;
-	munmap((char*)map - ofi, len + ofi);
-	return;
+	munmap((uint8_t*)map - ofi, len + ofi);
 }
 
 
