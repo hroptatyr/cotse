@@ -262,12 +262,6 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 {
 	size_t k = _s->nidx;
 
-	if (UNLIKELY(k == 0U)) {
-		/* brand new file, this is the first blob */
-		size_t hz = sizeof(*_s->mdr) + _s->public.nfields + 1U;
-		_s->root.z[0U] = hz << 1U;
-	}
-
 	if (_s->fd >= 0) {
 		/* backing file present */
 		off_t beg = _s->root.z[k + 0U];
