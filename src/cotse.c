@@ -78,9 +78,7 @@ struct fhdr_s {
 struct idx_s {
 	/* time-offsets */
 	cots_to_t t[NTIDX];
-	/* offset into file <<1 and LSB
-	 * 0 for leaf page
-	 * 1 for index page */
+	/* offset into file */
 	uint64_t z[NTIDX];
 };
 
@@ -253,7 +251,7 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 
 	if (_s->fd >= 0) {
 		/* backing file present */
-		off_t beg = _s->root.z[k + 0U] >> 1U;
+		off_t beg = _s->root.z[k + 0U];
 		uint8_t *m;
 
 		if (UNLIKELY(ftruncate(_s->fd, beg + b.z) < 0)) {
@@ -280,7 +278,7 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 	/* best effort to guess the next index's timestamp */
 	_s->root.t[k + 1U] = b.till;
 	/* store offsets, cumsum of sizes */
-	_s->root.z[k + 1U] = ((_s->root.z[k + 0U] >> 1U) + b.z) << 1U;
+	_s->root.z[k + 1U] = _s->root.z[k + 0U] + b.z;
 	/* store pointer */
 	_s->pidx[k + 0U] = b.data;
 	/* advance number of indices */
