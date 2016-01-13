@@ -169,7 +169,19 @@ mprot_any(void *map, off_t off, size_t len, int prot)
 	return mprotect(omp, len, prot);
 }
 
+static int
+msync_any(void *map, off_t off, size_t len, int flags)
+{
+	size_t pgsz = mmap_pgsz();
+	size_t ofi = off % pgsz;
+	uint8_t *omp = (uint8_t*)map - ofi;
 
+	omp = !((uintptr_t)omp & (pgsz - 1U)) ? omp : map;
+	len = !((uintptr_t)omp & (pgsz - 1U)) ? len + ofi : len;
+	return msync(omp, len, flags);
+}
+
+
 static struct blob_s
 _make_blob(const char *flds, size_t nflds, size_t nrows,
 	   const cots_to_t *t, const cots_tag_t *m, const uint64_t *rows)
@@ -274,8 +286,11 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 		}
 		/* simple copy it is now, yay */
 		memcpy(m, b.data, b.z);
+		/* make sure it's on disk, aye */
+		(void)msync_any(m, beg, b.z, MS_ASYNC);
 		/* write-protect this guy and swap blobs */
 		(void)mprot_any(m, beg, b.z, PROT_READ);
+		/* unmap the old map */
 		munmap(b.data, b.z);
 		/* and swap blob data */
 		b.data = m;
