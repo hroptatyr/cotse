@@ -146,6 +146,14 @@ munmap_any(void *map, off_t off, size_t len)
 	return munmap((uint8_t*)map - ofi, len + ofi);
 }
 
+static int
+mprot_any(void *map, off_t off, size_t len, int prot)
+{
+	size_t pgsz = mmap_pgsz();
+	size_t ofi = off % pgsz;
+	return mprotect((uint8_t*)map - ofi, len + ofi, prot);
+}
+
 
 static int
 _flush(struct _ts_s *_s)
