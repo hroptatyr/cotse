@@ -99,7 +99,8 @@ struct _ts_s {
 
 	/* scratch array, row wise */
 	uint64_t *row_scratch;
-	size_t j;
+	/* number of rows in the scratch buffer */
+	size_t nrows;
 
 	/* provision for NSAMP timestamps and tags */
 	cots_to_t t[NSAMP];
@@ -164,11 +165,11 @@ _flush(struct _ts_s *_s)
 	const char *const layo = _s->public.layout;
 	const uint64_t *rows = _s->row_scratch;
 	const size_t zrow = (nflds + 2U) * sizeof(*_s->row_scratch);
-	const size_t bsz = zrow * 3U * _s->j / 2U;
+	const size_t bsz = zrow * 3U * _s->nrows / 2U;
 	uint8_t *buf;
 	size_t z;
 
-	if (UNLIKELY(!_s->j)) {
+	if (UNLIKELY(!_s->nrows)) {
 		return 0;
 	}
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
@@ -177,11 +178,11 @@ _flush(struct _ts_s *_s)
 	}
 
 	/* call the compactor */
-	z = comp(buf + sizeof(z), nflds, _s->j, layo, _s->t, _s->m, rows);
+	z = comp(buf + sizeof(z), nflds, _s->nrows, layo, _s->t, _s->m, rows);
 	memcpy(buf, &z, sizeof(z));
 	z += sizeof(z);
 
-	size_t uncomp = _s->j * 2U * sizeof(uint64_t) + 12U * _s->j;
+	size_t uncomp = _s->nrows * 2U * sizeof(uint64_t) + 12U * _s->nrows;
 	fprintf(stderr, "comp %zu  (%0.2f%%)\n", z, 100. * (double)z / (double)uncomp);
 
 	/* write data */
@@ -191,14 +192,14 @@ _flush(struct _ts_s *_s)
 	/* store in index */
 	_s->root.t[_s->nidx + 0U] = _s->t[0U];
 	/* best effort to guess the next index's timestamp */
-	_s->root.t[_s->nidx + 1U] = _s->t[_s->j - 1U];
+	_s->root.t[_s->nidx + 1U] = _s->t[_s->nrows - 1U];
 	/* store size of course */
 	_s->root.z[_s->nidx + 1U] = _s->root.z[_s->nidx] + (uint32_t)z;
 	/* store pointer */
 	_s->pidx[_s->nidx + 0U] = mremap(buf, bsz, z, MREMAP_MAYMOVE);
 	_s->nidx++;
 
-	_s->j = 0U;
+	_s->nrows = 0U;
 	return -1;
 }
 
@@ -238,7 +239,7 @@ free_cots_ts(cots_ts_t ts)
 {
 	struct _ts_s *_ts = (void*)ts;
 
-	if (UNLIKELY(_ts->j)) {
+	if (UNLIKELY(_ts->nrows)) {
 		_flush(_ts);
 	}
 	if (LIKELY(_ts->public.layout != nul_layout)) {
@@ -486,11 +487,11 @@ cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 	struct _ts_s *_s = (void*)s;
 	va_list vap;
 
-	_s->t[_s->j] = t;
-	_s->m[_s->j] = m;
+	_s->t[_s->nrows] = t;
+	_s->m[_s->nrows] = m;
 	va_start(vap, m);
 	for (size_t i = 0U, n = _s->public.nfields,
-		     row = _s->j * n; i < n; i++) {
+		     row = _s->nrows * n; i < n; i++) {
 		switch (_s->public.layout[i]) {
 		case COTS_LO_PRC:
 		case COTS_LO_FLT:
@@ -506,7 +507,7 @@ cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 	}
 	va_end(vap);
 
-	if (UNLIKELY(++_s->j == NSAMP)) {
+	if (UNLIKELY(++_s->nrows == NSAMP)) {
 		/* auto-eviction */
 		_flush(_s);
 	}
@@ -519,13 +520,13 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 	struct _ts_s *_s = (void*)s;
 	const size_t nflds = _s->public.nfields;
 
-	_s->t[_s->j] = data->toff;
-	_s->m[_s->j] = data->tag;
+	_s->t[_s->nrows] = data->toff;
+	_s->m[_s->nrows] = data->tag;
 
-	memcpy(&_s->row_scratch[_s->j * nflds],
+	memcpy(&_s->row_scratch[_s->nrows * nflds],
 	       data->value, nflds * sizeof(uint64_t));
 
-	if (UNLIKELY(++_s->j == NSAMP)) {
+	if (UNLIKELY(++_s->nrows == NSAMP)) {
 		/* auto-eviction */
 		_flush(_s);
 	}
