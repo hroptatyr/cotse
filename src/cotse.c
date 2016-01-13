@@ -321,8 +321,11 @@ _flush_hdr(const struct _ts_s *_s)
 		return 0;
 	}
 	/* otherwise */
-	_s->mdr->ioff = htobe64(_s->root.z[_s->nidx]);
-
+	with (size_t blobz = _s->root.z[_s->nidx],
+	      indez = _s->nidx * (sizeof(*_s->root.t) + sizeof(*_s->root.z))) {
+		_s->mdr->ioff = htobe64(blobz + 0U);
+		_s->mdr->ooff = htobe64(blobz + indez);
+	}
 	msync_any(_s->mdr, 0U, sizeof(*_s->mdr) + nflds + 1U, MS_ASYNC);
 	return 0;
 }
