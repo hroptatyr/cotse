@@ -42,7 +42,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 #include "cotse.h"
 #include "comp.h"
 #include "intern.h"
@@ -59,8 +61,37 @@
 #define NSAMP		(8192U)
 #define NTIDX		(512U)
 
+/* file header, mmapped for convenience */
+struct fhdr_s {
+	uint8_t magic[4U];
+	uint8_t version[2U];
+	uint16_t endian;
+	uint64_t flags;
+	/* offset to index pages */
+	uint64_t ioff;
+	/* offset to obarray */
+	uint64_t ooff;
+	/* layout, \nul term'd */
+	uint8_t layout[];
+};
+
+struct idx_s {
+	/* time-offsets */
+	cots_to_t t[NTIDX];
+	/* offset into file <<1 and LSB
+	 * 0 for leaf page
+	 * 1 for index page */
+	uint64_t z[NTIDX];
+};
+
 struct _ts_s {
 	struct cots_ts_s public;
+
+	/* mmapped file header */
+	struct fhdr_s *mdr;
+	/* payload size */
+	size_t dz;
+
 	/* compacted version of fields */
 	char *fields;
 
@@ -74,32 +105,14 @@ struct _ts_s {
 	cots_to_t t[NSAMP];
 	cots_tag_t m[NSAMP];
 
-	/* currently attached file */
+	/* currently attached file and its opening flags */
 	int fd;
+	int fl;
 
-	cots_to_t tidx[NTIDX];
+	struct idx_s root;
+	/* cache pointers to already mapped regions */
 	uint8_t *pidx[NTIDX];
 	size_t k;
-};
-
-struct fhdr_s {
-	uint8_t magic[4U];
-	uint8_t version[2U];
-	uint16_t endian;
-	uint64_t flags;
-	/* offset to index pages */
-	uint64_t ioff;
-	/* offset to wal */
-	uint64_t woff;
-	/* layout, \nul term'd */
-	uint8_t layout[];
-};
-
-struct idx_page_s {
-	/* time-offsets */
-	cots_to_t tidx[NTIDX];
-	/* block sizes */
-	uint32_t zblk[NTIDX];
 };
 
 static const char nul_layout[] = "";
@@ -134,27 +147,11 @@ munmap_any(void *map, off_t off, size_t len)
 	return;
 }
 
-static void
-wr_hdr(const struct _ts_s *_s)
-{
-	const size_t nflds = _s->public.nfields;
-	struct fhdr_s h = {
-		"cots", "v0", 0x3c3eU, 0ULL, 0ULL, 0ULL,
-	};
-	write(STDOUT_FILENO, &h, sizeof(h));
-	write(STDOUT_FILENO, _s->public.layout, nflds + 1U);
-
-	if (_s->public.fields) {
-		const char *last = _s->public.fields[nflds - 1U];
-		size_t zfld = last + strlen(last) - _s->fields;
-		write(STDOUT_FILENO, _s->fields, zfld + 1U);
-	}
-	return;
-}
 
 static int
-_evict_scratch(struct _ts_s *_s)
+_flush(struct _ts_s *_s)
 {
+/* compact WAL and write contents to backing file */
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
 	const uint64_t *rows = _s->row_scratch;
@@ -179,20 +176,18 @@ _evict_scratch(struct _ts_s *_s)
 	size_t uncomp = _s->j * 2U * sizeof(uint64_t) + 12U * _s->j;
 	fprintf(stderr, "comp %zu  (%0.2f%%)\n", z, 100. * (double)z / (double)uncomp);
 
-	if (!_s->k) {
-		wr_hdr(_s);
-	};
 	/* write data */
 	write(STDOUT_FILENO, buf, z);
 	fsync(STDOUT_FILENO);
 
 	/* store in index */
-	_s->tidx[_s->k + 0U] = _s->t[0U];
+	_s->root.t[_s->k + 0U] = _s->t[0U];
 	/* best effort to guess the next index's timestamp */
-	_s->tidx[_s->k + 1U] = _s->t[_s->j - 1U];
+	_s->root.t[_s->k + 1U] = _s->t[_s->j - 1U];
+	/* store size of course */
+	_s->root.z[_s->k + 1U] = _s->root.z[_s->k] + (uint32_t)z;
 	/* store pointer */
 	_s->pidx[_s->k + 0U] = mremap(buf, bsz, z, MREMAP_MAYMOVE);
-	_s->pidx[_s->k + 1U] = _s->pidx[_s->k + 0U] + z;
 	_s->k++;
 
 	_s->j = 0U;
@@ -205,22 +200,28 @@ cots_ts_t
 make_cots_ts(const char *layout)
 {
 	struct _ts_s *res = calloc(1, sizeof(*res));
+	size_t laylen;
 
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
+		laylen = strlen(layout);
 	} else {
 		res->public.layout = nul_layout;
+		laylen = 0U;
 	}
 
-	with (size_t nflds = strlen(res->public.layout)) {
+	/* store layout length as nfields */
+	{
 		void *nfp = deconst(&res->public.nfields);
-		memcpy(nfp, &nflds, sizeof(nflds));
+		memcpy(nfp, &laylen, sizeof(laylen));
 
-		res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
+		res->row_scratch = calloc(laylen * NSAMP, sizeof(uint64_t));
 	}
 	res->obarray = make_cots_ob();
 
-	/* use a backing file */
+	/* use a backing file? */
+	res->fd = -1;
+
 	return (cots_ts_t)res;
 }
 
@@ -230,7 +231,7 @@ free_cots_ts(cots_ts_t ts)
 	struct _ts_s *_ts = (void*)ts;
 
 	if (UNLIKELY(_ts->j)) {
-		_evict_scratch(_ts);
+		_flush(_ts);
 	}
 	if (LIKELY(_ts->public.layout != nul_layout)) {
 		free(deconst(_ts->public.layout));
@@ -313,6 +314,102 @@ cots_close_ts(cots_ts_t s)
 		close(_s->fd);
 	}
 	free_cots_ts(s);
+	return 0;
+}
+
+
+int
+cots_attach(cots_ts_t s, const char *file, int flags)
+{
+	struct fhdr_s *mdr;
+	struct stat st;
+	int fd;
+
+	if ((fd = open(file, flags, 0666)) < 0) {
+		return -1;
+	} else if (fstat(fd, &st) < 0) {
+		goto clo_out;
+	}
+
+	if (LIKELY(!st.st_size)) {
+		/* new file, yay, truncate to accomodate header */
+		off_t hz = sizeof(*mdr) + s->nfields + 1U;
+
+		if (UNLIKELY(ftruncate(fd, hz) < 0)) {
+			goto clo_out;
+		}
+		/* map the header */
+		mdr = mmap_any(fd, PROT_WRITE, MAP_SHARED, 0, hz);
+		if (UNLIKELY(mdr == NULL)) {
+			goto clo_out;
+		}
+		/* bang a basic header out */
+		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
+			memcpy(mdr, &proto, sizeof(*mdr));
+			memcpy(mdr->layout, s->layout, s->nfields + 1U);
+		}
+
+	} else if (st.st_size < (ssize_t)sizeof(*mdr)) {
+		/* can't be right */
+		goto clo_out;
+
+	} else {
+		/* read file's header and indices */
+		off_t hz = sizeof(*mdr) + s->nfields + 1U;
+
+		mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
+		if (UNLIKELY(mdr == NULL)) {
+			goto clo_out;
+		}
+		/* inspect header, in particular see if fields coincide */
+		if (strcmp((const char*)mdr->layout, s->layout)) {
+			/* nope, better fuck off then */
+			goto unm_out;
+		}
+		/* yep they do, switch off write protection */
+		;
+	}
+
+	/* we're good to go, detach any old files */
+	cots_detach(s);
+
+	/* attach this one */
+	with (struct _ts_s *_s = (void*)s) {
+		/* the header as mapped */
+		_s->mdr = mdr;
+		_s->public.filename = strdup(file);
+		_s->fd = fd;
+		_s->fl = flags;
+	}
+	return 0;
+
+unm_out:
+	munmap_any(mdr, 0, sizeof(*mdr) + s->nfields + 1U);
+clo_out:
+	save_errno {
+		close(fd);
+	}
+	return -1;
+}
+
+int
+cots_detach(cots_ts_t s)
+{
+	struct _ts_s *_s = (void*)s;
+
+	if (_s->public.filename) {
+		free(deconst(_s->public.filename));
+		_s->public.filename = NULL;
+	}
+	if (_s->mdr) {
+		const size_t hz = sizeof(*_s->mdr) + _s->public.nfields + 1U;
+		munmap_any(_s->mdr, 0, hz);
+	}
+	if (_s->fd >= 0) {
+		close(_s->fd);
+		_s->fd = -1;
+		_s->fl = 0;
+	}
 	return 0;
 }
 
@@ -403,7 +500,7 @@ cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
 
 	if (UNLIKELY(++_s->j == NSAMP)) {
 		/* auto-eviction */
-		_evict_scratch(_s);
+		_flush(_s);
 	}
 	return 0;
 }
@@ -422,7 +519,7 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 
 	if (UNLIKELY(++_s->j == NSAMP)) {
 		/* auto-eviction */
-		_evict_scratch(_s);
+		_flush(_s);
 	}
 	return 0;
 }

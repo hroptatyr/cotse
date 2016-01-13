@@ -130,11 +130,11 @@ extern void free_cots_ts(cots_ts_t);
 
 /**
  * Attach backing FILE to series. */
-extern int cots_atch(cots_ts_t, const char *file, int flags);
+extern int cots_attach(cots_ts_t, const char *file, int flags);
 
 /**
  * Detach files from series, if any. */
-extern int cots_dtch(cots_ts_t);
+extern int cots_detach(cots_ts_t);
 
 /**
  * Open a cots-ts file. */
