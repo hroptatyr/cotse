@@ -48,6 +48,7 @@
 #include "cotse.h"
 #include "comp.h"
 #include "intern.h"
+#include "boobs.h"
 #include "nifty.h"
 
 #include <stdio.h>
@@ -94,8 +95,6 @@ struct _ts_s {
 
 	/* mmapped file header */
 	struct fhdr_s *mdr;
-	/* payload size */
-	size_t dz;
 
 	/* compacted version of fields */
 	char *fields;
@@ -310,6 +309,21 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 }
 
 static int
+_flush_hdr(const struct _ts_s *_s)
+{
+	if (UNLIKELY(_s->fd < 0)) {
+		/* no need */
+		return 0;
+	} else if (UNLIKELY(_s->mdr == NULL)) {
+		/* great */
+		return 0;
+	}
+	/* otherwise */
+	_s->mdr->ioff = htobe64(_s->root.z[_s->nidx]);
+	return 0;
+}
+
+static int
 _flush(struct _ts_s *_s)
 {
 /* compact WAL and write contents to backing file */
@@ -337,6 +351,9 @@ _flush(struct _ts_s *_s)
 
 	/* write out indices */
 	;
+
+	/* update header */
+	_flush_hdr(_s);
 
 	_s->nrows = 0U;
 	return -1;
