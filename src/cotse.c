@@ -374,7 +374,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 			goto unm_out;
 		}
 		/* yep they do, switch off write protection */
-		;
+		(void)mprot_any(mdr, 0, hz, PROT_WRITE);
 	}
 
 	/* we're good to go, detach any old files */
