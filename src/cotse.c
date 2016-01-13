@@ -112,7 +112,8 @@ struct _ts_s {
 	struct idx_s root;
 	/* cache pointers to already mapped regions */
 	uint8_t *pidx[NTIDX];
-	size_t k;
+	/* number of indices */
+	size_t nidx;
 };
 
 static const char nul_layout[] = "";
@@ -188,14 +189,14 @@ _flush(struct _ts_s *_s)
 	fsync(STDOUT_FILENO);
 
 	/* store in index */
-	_s->root.t[_s->k + 0U] = _s->t[0U];
+	_s->root.t[_s->nidx + 0U] = _s->t[0U];
 	/* best effort to guess the next index's timestamp */
-	_s->root.t[_s->k + 1U] = _s->t[_s->j - 1U];
+	_s->root.t[_s->nidx + 1U] = _s->t[_s->j - 1U];
 	/* store size of course */
-	_s->root.z[_s->k + 1U] = _s->root.z[_s->k] + (uint32_t)z;
+	_s->root.z[_s->nidx + 1U] = _s->root.z[_s->nidx] + (uint32_t)z;
 	/* store pointer */
-	_s->pidx[_s->k + 0U] = mremap(buf, bsz, z, MREMAP_MAYMOVE);
-	_s->k++;
+	_s->pidx[_s->nidx + 0U] = mremap(buf, bsz, z, MREMAP_MAYMOVE);
+	_s->nidx++;
 
 	_s->j = 0U;
 	return -1;
