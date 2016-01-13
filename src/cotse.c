@@ -546,6 +546,15 @@ cots_detach(cots_ts_t s)
 	if (UNLIKELY(_s->nrows)) {
 		_flush(_s);
 	}
+	/* munmap blobs */
+	for (size_t i = 0U; i < _s->nidx; i++) {
+		if (_s->pidx[i] != NULL) {
+			const off_t off = _s->root.z[i];
+			const size_t len = _s->root.z[i + 1U] - off;
+			munmap_any(_s->pidx[i], off, len);
+			_s->pidx[i] = NULL;
+		}
+	}
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
 		_s->public.filename = NULL;
