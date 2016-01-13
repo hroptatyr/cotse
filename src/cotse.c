@@ -84,6 +84,13 @@ struct idx_s {
 	uint64_t z[NTIDX];
 };
 
+struct blob_s {
+	size_t z;
+	uint8_t *data;
+	cots_to_t from;
+	cots_to_t till;
+};
+
 struct _ts_s {
 	struct cots_ts_s public;
 
@@ -157,6 +164,130 @@ mprot_any(void *map, off_t off, size_t len, int prot)
 }
 
 
+static struct blob_s
+_make_blob(const char *flds, size_t nflds, size_t nrows,
+	   const cots_to_t *t, const cots_tag_t *m, const uint64_t *rows)
+{
+#define ALGN16(x)	(void*)((uintptr_t)((x) + 0xfU) & ~0xfULL)
+	const size_t zrow = (nflds + 2U) * sizeof(*rows);
+	void *cols[nflds];
+	uint8_t *buf;
+	size_t bsz;
+	size_t z;
+
+	if (UNLIKELY(!nrows)) {
+		/* trivial */
+		return (struct blob_s){0U, NULL};
+	}
+
+	/* trial mmap */
+	bsz = 3U * zrow * nrows / 2U;
+	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
+	if (buf == MAP_FAILED) {
+		return (struct blob_s){0U, NULL};
+	}
+
+	/* columnarise */
+	for (size_t i = 0U,
+		     /* column index with some breathing space in bytes */
+		     bi = 3U * 2U * sizeof(*rows) * nrows / 2U;
+	     i < nflds; i++) {
+		cols[i] = ALGN16(buf + bi + sizeof(z));
+
+		switch (flds[i]) {
+		case COTS_LO_PRC:
+		case COTS_LO_FLT: {
+			uint32_t *c = cols[i];
+
+			for (size_t j = 0U; j < nrows; j++) {
+				c[j] = rows[j * nflds + i];
+			}
+			bi += nrows * sizeof(*c);
+			break;
+		}
+		case COTS_LO_QTY:
+		case COTS_LO_DBL: {
+			uint64_t *c = cols[i];
+
+			for (size_t j = 0U; j < nrows; j++) {
+				c[j] = rows[j * nflds + i];
+			}
+			bi += nrows * sizeof(*c);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	/* call the compactor */
+	z = comp(buf + sizeof(z), nflds, nrows, flds, t, m, cols);
+	memcpy(buf, &z, sizeof(z));
+	z += sizeof(z);
+
+	/* make the map a bit tinier */
+	with (uint8_t *blo = mremap(buf, bsz, z, MREMAP_MAYMOVE)) {
+		if (UNLIKELY(blo == MAP_FAILED)) {
+			/* what a pity */
+			goto mun_out;
+		}
+		buf = blo;
+	}
+	return (struct blob_s){z, buf, t[0U], t[nrows - 1U]};
+
+mun_out:
+	munmap(buf, bsz);
+	return (struct blob_s){0U, NULL};
+}
+
+static int
+_add_blob(struct _ts_s *_s, struct blob_s b)
+{
+	size_t k = _s->nidx;
+
+	if (UNLIKELY(k == 0U)) {
+		/* brand new file, this is the first blob */
+		size_t hz = sizeof(*_s->mdr) + _s->public.nfields + 1U;
+		_s->root.z[0U] = hz << 1U;
+	}
+
+	if (_s->fd >= 0) {
+		/* backing file present */
+		off_t beg = _s->root.z[k + 0U] >> 1U;
+		uint8_t *m;
+
+		if (UNLIKELY(ftruncate(_s->fd, beg + b.z) < 0)) {
+			/* FUCCCK, we might as well hang ourself */
+			return -1;
+		}
+		/* mmap the blob in the file */
+		m = mmap_any(_s->fd, PROT_WRITE, MAP_SHARED, beg, b.z);
+		if (UNLIKELY(m == MAP_FAILED)) {
+			/* this is a fucking disaster */
+			return -1;
+		}
+		/* simple copy it is now, yay */
+		memcpy(m, b.data, b.z);
+		/* write-protect this guy and swap blobs */
+		(void)mprot_any(m, beg, b.z, PROT_READ);
+		munmap(b.data, b.z);
+		/* and swap blob data */
+		b.data = m;
+	}
+
+	/* store in index */
+	_s->root.t[k + 0U] = b.from;
+	/* best effort to guess the next index's timestamp */
+	_s->root.t[k + 1U] = b.till;
+	/* store offsets, cumsum of sizes */
+	_s->root.z[k + 1U] = ((_s->root.z[k + 0U] >> 1U) + b.z) << 1U;
+	/* store pointer */
+	_s->pidx[k + 0U] = b.data;
+	/* advance number of indices */
+	_s->nidx++;
+	return 0;
+}
+
 static int
 _flush(struct _ts_s *_s)
 {
@@ -164,40 +295,27 @@ _flush(struct _ts_s *_s)
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
 	const uint64_t *rows = _s->row_scratch;
-	const size_t zrow = (nflds + 2U) * sizeof(*_s->row_scratch);
-	const size_t bsz = zrow * 3U * _s->nrows / 2U;
-	uint8_t *buf;
-	size_t z;
+	struct blob_s b;
 
 	if (UNLIKELY(!_s->nrows)) {
 		return 0;
 	}
-	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
-	if (UNLIKELY(buf == MAP_FAILED)) {
+	/* get ourselves a blob first */
+	b = _make_blob(layo, nflds, _s->nrows, _s->t, _s->m, rows);
+
+	if (UNLIKELY(b.data == NULL)) {
+		/* blimey */
 		return -1;
 	}
 
-	/* call the compactor */
-	z = comp(buf + sizeof(z), nflds, _s->nrows, layo, _s->t, _s->m, rows);
-	memcpy(buf, &z, sizeof(z));
-	z += sizeof(z);
-
 	size_t uncomp = _s->nrows * 2U * sizeof(uint64_t) + 12U * _s->nrows;
-	fprintf(stderr, "comp %zu  (%0.2f%%)\n", z, 100. * (double)z / (double)uncomp);
+	fprintf(stderr, "comp %zu  (%0.2f%%)\n", b.z, 100. * (double)b.z / (double)uncomp);
 
-	/* write data */
-	write(STDOUT_FILENO, buf, z);
-	fsync(STDOUT_FILENO);
+	/* manifest blob in file */
+	_add_blob(_s, b);
 
-	/* store in index */
-	_s->root.t[_s->nidx + 0U] = _s->t[0U];
-	/* best effort to guess the next index's timestamp */
-	_s->root.t[_s->nidx + 1U] = _s->t[_s->nrows - 1U];
-	/* store size of course */
-	_s->root.z[_s->nidx + 1U] = _s->root.z[_s->nidx] + (uint32_t)z;
-	/* store pointer */
-	_s->pidx[_s->nidx + 0U] = mremap(buf, bsz, z, MREMAP_MAYMOVE);
-	_s->nidx++;
+	/* write out indices */
+	;
 
 	_s->nrows = 0U;
 	return -1;
