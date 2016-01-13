@@ -105,6 +105,35 @@ struct idx_page_s {
 static const char nul_layout[] = "";
 
 
+static size_t
+mmap_pgsz(void)
+{
+	static size_t pgsz;
+
+	if (UNLIKELY(!pgsz)) {
+		pgsz = sysconf(_SC_PAGESIZE);
+	}
+	return pgsz;
+}
+
+static void*
+mmap_any(int fd, int prot, int flags, off_t off, size_t len)
+{
+	const size_t pgsz = mmap_pgsz();
+	size_t ofp = off / pgsz, ofi = off % pgsz;
+	char *p = mmap(NULL, len + ofi, prot, flags, fd, ofp * pgsz);
+	return LIKELY(p != MAP_FAILED) ? p + ofi : NULL;
+}
+
+static void
+munmap_any(void *map, off_t off, size_t len)
+{
+	size_t pgsz = mmap_pgsz();
+	size_t ofi = off % pgsz;
+	munmap((char*)map - ofi, len + ofi);
+	return;
+}
+
 static void
 wr_hdr(const struct _ts_s *_s)
 {
