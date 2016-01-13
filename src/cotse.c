@@ -529,6 +529,17 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 			memcpy(mdr, &proto, sizeof(*mdr));
 			memcpy(mdr->layout, s->layout, s->nfields + 1U);
 		}
+		with (struct _ts_s *_s = (void*)s) {
+			/* adjust index offsets, cases 1, 5 */
+			if (_s->fd >= 0) {
+				/* assume the old attachment has the
+				 * fixup already, cases 3, 7 */
+				break;
+			}
+			for (size_t i = 0U; i <= _s->nidx; i++) {
+				_s->root.z[i] += hz;
+			}
+		}
 
 	} else if (st.st_size < (ssize_t)sizeof(*mdr)) {
 		/* can't be right */
