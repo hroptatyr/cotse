@@ -491,6 +491,17 @@ cots_close_ts(cots_ts_t s)
 int
 cots_attach(cots_ts_t s, const char *file, int flags)
 {
+/* we've got the following cases
+ *    S has data   S has file   FILE has data
+ * 1.      -            -             -
+ * 2.      -            -             x
+ * 3.      -            x             -
+ * 4.      -            x             x
+ * 5.      x            -             -
+ * 6.      x            -             x
+ * 7.      x            x             -
+ * 8.      x            x             x
+ */
 	struct fhdr_s *mdr;
 	struct stat st;
 	int fd;
@@ -567,22 +578,24 @@ cots_detach(cots_ts_t s)
 {
 	struct _ts_s *_s = (void*)s;
 
-	if (UNLIKELY(_s->nrows)) {
-		_flush(_s);
-	}
-	/* munmap blobs */
-	for (size_t i = 0U; i < _s->nidx; i++) {
-		if (_s->pidx[i] != NULL) {
-			const off_t off = _s->root.z[i];
-			const size_t len = _s->root.z[i + 1U] - off;
-			munmap_any(_s->pidx[i], off, len);
-			_s->pidx[i] = NULL;
+	if (_s->fd >= 0) {
+		if (UNLIKELY(_s->nrows)) {
+			_flush(_s);
 		}
+		/* munmap blobs */
+		for (size_t i = 0U; i < _s->nidx; i++) {
+			if (_s->pidx[i] != NULL) {
+				const off_t off = _s->root.z[i];
+				const size_t len = _s->root.z[i + 1U] - off;
+				munmap_any(_s->pidx[i], off, len);
+				_s->pidx[i] = NULL;
+			}
+		}
+		/* reset indices */
+		_s->nidx = 0U;
+		_s->root.t[0U] = 0U;
+		_s->root.z[0U] = 0U;
 	}
-	/* reset indices */
-	_s->nidx = 0U;
-	_s->root.t[0U] = 0U;
-	_s->root.z[0U] = 0U;
 
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
