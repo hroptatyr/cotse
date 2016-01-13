@@ -138,12 +138,12 @@ mmap_any(int fd, int prot, int flags, off_t off, size_t len)
 	return LIKELY(p != MAP_FAILED) ? p + ofi : NULL;
 }
 
-static void
+static int
 munmap_any(void *map, off_t off, size_t len)
 {
 	size_t pgsz = mmap_pgsz();
 	size_t ofi = off % pgsz;
-	munmap((uint8_t*)map - ofi, len + ofi);
+	return munmap((uint8_t*)map - ofi, len + ofi);
 }
 
 
