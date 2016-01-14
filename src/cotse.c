@@ -456,15 +456,28 @@ cots_open_ts(const char *file, int flags)
 {
 	struct _ts_s *res;
 	struct fhdr_s hdr;
+	struct stat st;
+	size_t nflds;
 	int fd;
 
 	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
 		return NULL;
+	} else if (fstat(fd, &st) < 0) {
+		goto clo_out;
 	}
+
+	if (UNLIKELY(st.st_size < (ssize_t)sizeof(*res->mdr))) {
+		goto clo_out;
+	}
+
 	/* read header bit */
 	if (read(fd, &hdr, sizeof(hdr)) < (ssize_t)sizeof(hdr)) {
-		close(fd);
-		return NULL;
+		goto clo_out;
+	}
+	/* inspect header */
+	if (memcmp(hdr.magic, "cots", sizeof(hdr.magic))) {
+		/* nope, better fuck off then */
+		goto clo_out;
 	}
 
 	if (UNLIKELY((res = calloc(1, sizeof(*res))) == NULL)) {
@@ -488,22 +501,36 @@ cots_open_ts(const char *file, int flags)
 			layo = realloc(layo, zlay * 2U);
 		}
 		res->public.layout = layo;
-
-		with (size_t nflds = eo - layo) {
-			void *nfp = deconst(&res->public.nfields);
-			memcpy(nfp, &nflds, sizeof(nflds));
-		}
+		/* determine nflds */
+		nflds = eo - layo;
 	}
 
-	with (size_t nflds = strlen(res->public.layout)) {
-		void *nfp = deconst(&res->public.nfields);
+	/* make number of fields known publicly */
+	with (void *nfp = deconst(&res->public.nfields)) {
 		memcpy(nfp, &nflds, sizeof(nflds));
-
-		res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
+	}
+	/* get some scratch space for this one */
+	res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
+	/* map the header for reference */
+	with (off_t hz = sizeof(*res->mdr) + nflds + 1U) {
+		res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
+		if (UNLIKELY(res->mdr == NULL)) {
+			goto fre_out;
+		}
 	}
 
 	/* use a backing file */
 	return (cots_ts_t)res;
+
+fre_out:
+	free(deconst(res->public.filename));
+	free(res->row_scratch);
+	free(res);
+clo_out:
+	save_errno {
+		close(fd);
+	}
+	return NULL;
 }
 
 int
