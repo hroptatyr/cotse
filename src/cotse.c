@@ -345,7 +345,7 @@ _add_idxs(struct _ts_s *_s)
 		m[i] = htobe64(_s->root.t[i]);
 	}
 	for (size_t i = 0U; i <= nidx; i++) {
-		m[nidx + i] = htobe64(_s->root.z[i]);
+		m[nidx + 1U + i] = htobe64(_s->root.z[i]);
 	}
 	/* make sure it's on disk, aye */
 	(void)msync_any(m, beg, end - beg, MS_ASYNC);
