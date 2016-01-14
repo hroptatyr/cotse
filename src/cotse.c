@@ -244,10 +244,9 @@ _algn_zcols(const char *layout, size_t nflds)
 }
 
 static struct blob_s
-_make_blob(const char *flds, size_t nflds, size_t nrows,
-	   const cots_to_t *t, const cots_tag_t *m, const uint64_t *rows)
+_make_blob(const char *flds, size_t nflds, size_t zcols, size_t nrows,
+	   const cots_to_t *t, const cots_tag_t *m, const void *rows)
 {
-	const size_t zrow = (nflds + 2U) * sizeof(*rows);
 	void *cols[nflds];
 	uint8_t *buf;
 	size_t bsz;
@@ -259,7 +258,7 @@ _make_blob(const char *flds, size_t nflds, size_t nrows,
 	}
 
 	/* trial mmap */
-	bsz = 3U * zrow * nrows / 2U;
+	bsz = 3U * (sizeof(*t) + sizeof(*m) + zcols) * nrows / 2U;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
@@ -268,29 +267,36 @@ _make_blob(const char *flds, size_t nflds, size_t nrows,
 	/* columnarise */
 	for (size_t i = 0U,
 		     /* column index with some breathing space in bytes */
-		     bi = 3U * 2U * sizeof(*rows) * nrows / 2U;
+		     bi = 3U * (sizeof(*t) + sizeof(*m)) * nrows / 2U;
 	     i < nflds; i++) {
+		const size_t a = _algn_zcols(flds, i);
 		cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
 
 		switch (flds[i]) {
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
 			uint32_t *c = cols[i];
+			const uint32_t *r =
+				(const uint32_t*)rows + a / sizeof(*r);
+			const size_t acols = zcols / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = rows[j * nflds + i];
+				c[j] = r[j * acols];
 			}
-			bi += nrows * sizeof(*c);
+			bi += 3U * nrows * sizeof(*c) / 2U;
 			break;
 		}
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols[i];
+			const uint64_t *r =
+				(const uint64_t*)rows + a / sizeof(*r);
+			const size_t acols = zcols / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = rows[j * nflds + i];
+				c[j] = r[j * acols];
 			}
-			bi += nrows * sizeof(*c);
+			bi += 3U * nrows * sizeof(*c) / 2U;
 			break;
 		}
 		default:
@@ -434,7 +440,7 @@ _flush(struct _ts_s *_s)
 		return 0;
 	}
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->nrows, _s->t, _s->m, rows);
+	b = _make_blob(layo, nflds, _s->zcols, _s->nrows, _s->t, _s->m, rows);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
@@ -888,8 +894,7 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 	_s->t[_s->nrows] = data->toff;
 	_s->m[_s->nrows] = data->tag;
 
-	memcpy(&_s->row_scratch[_s->nrows * nflds],
-	       data->value, nflds * sizeof(uint64_t));
+	memcpy(&_s->row_scratch[_s->nrows * nflds], data->value, _s->zcols);
 
 	if (UNLIKELY(++_s->nrows == NSAMP)) {
 		/* auto-eviction */
