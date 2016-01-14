@@ -62,6 +62,8 @@
 #define NSAMP		(8192U)
 #define NTIDX		(512U)
 
+#define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
+
 /* file header, mmapped for convenience */
 struct fhdr_s {
 	uint8_t magic[4U];
@@ -181,11 +183,24 @@ msync_any(void *map, off_t off, size_t len, int flags)
 }
 
 
+static inline off_t
+_ioff(const struct _ts_s *_s)
+{
+/* calculate index offset, that's header size + blob size + alignment */
+	return ALGN16(_s->root.z[_s->nidx]);
+}
+
+static inline size_t
+_ilen(const struct _ts_s *_s)
+{
+/* calculate index length */
+	return (_s->nidx + 1U) * (sizeof(*_s->root.t) + sizeof(*_s->root.z));
+}
+
 static struct blob_s
 _make_blob(const char *flds, size_t nflds, size_t nrows,
 	   const cots_to_t *t, const cots_tag_t *m, const uint64_t *rows)
 {
-#define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
 	const size_t zrow = (nflds + 2U) * sizeof(*rows);
 	void *cols[nflds];
 	uint8_t *buf;
