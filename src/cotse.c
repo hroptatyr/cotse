@@ -849,14 +849,50 @@ ssize_t
 cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 {
 	struct _ts_s *_s = (void*)s;
-	size_t n = NSAMP;
+	const size_t nflds = _s->public.nfields;
+	const char *layo = _s->public.layout;
+	size_t n = 0U;
+	size_t z;
+	off_t poff;
+	off_t eoff;
+	uint8_t *m;
+	size_t mi = 0U;
 
+	/* we need a cursor type! */
+	;
+
+	/* find offset of page and length */
+	poff = _s->root.z[0U];
+	eoff = _s->root.z[1U];
+
+	if (UNLIKELY(eoff <= poff)) {
+		return -1;
+	}
+	/* otherwise map */
+	m = mmap_any(_s->fd, PROT_READ, MAP_SHARED, poff, eoff - poff);
+	if (UNLIKELY(m == NULL)) {
+		return -1;
+	}
+
+	/* quickly inspect integrity */
+	memcpy(&z, m, sizeof(z));
+	mi += sizeof(z);
+	if (UNLIKELY(z != eoff - poff - sizeof(z))) {
+		goto mun_out;
+	}
+
+	/* setup result soa */
 	tsoa->toffs = _s->t;
 	tsoa->tags = _s->m;
-
-	for (size_t i = 0U, nflds = _s->public.nfields; i < nflds; i++) {
-		tsoa->more[i] = _s->row_scratch + i * n;
+	for (size_t i = 0U; i < nflds; i++) {
+		tsoa->more[i] = _s->row_scratch + i * NSAMP;
 	}
+
+	/* decompress */
+	n = dcmp(_s->t, _s->m, tsoa->more, nflds, layo, m + mi, z);
+
+mun_out:
+	munmap_any(m, poff, z);
 	return n;
 }
 
