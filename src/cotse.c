@@ -218,16 +218,16 @@ _algn_zcols(const char *layout, size_t nflds)
 		case COTS_LO_PRC:
 		case COTS_LO_FLT:
 			/* round cnt[i] up to next 4/2^i multiple */
-			cnt[0U/*2^0*/] += ALGN4(cnt[0U]);
-			cnt[1U/*2^1*/] += ALGN2(cnt[1U]);
+			cnt[0U/*2^0*/] = ALGN4(cnt[0U]);
+			cnt[1U/*2^1*/] = ALGN2(cnt[1U]);
 			cnt[2U/*2^2*/]++;
 			break;
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
 			/* round cnt[i] up to next 8/2^i multiple */
-			cnt[0U/*2^0*/] += ALGN8(cnt[0U]);
-			cnt[1U/*2^1*/] += ALGN4(cnt[1U]);
-			cnt[2U/*2^2*/] += ALGN2(cnt[2U]);
+			cnt[0U/*2^0*/] = ALGN8(cnt[0U]);
+			cnt[1U/*2^1*/] = ALGN4(cnt[1U]);
+			cnt[2U/*2^2*/] = ALGN2(cnt[2U]);
 			cnt[3U/*2^3*/]++;
 			break;
 		default:
