@@ -63,6 +63,9 @@
 #define NTIDX		(512U)
 
 #define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
+#define ALGN8(x)	((uintptr_t)((x) + 0x7U) & ~0x7ULL)
+#define ALGN4(x)	((uintptr_t)((x) + 0x3U) & ~0x3ULL)
+#define ALGN2(x)	((uintptr_t)((x) + 0x1U) & ~0x1ULL)
 
 /* file header, mmapped for convenience */
 struct fhdr_s {
@@ -101,7 +104,11 @@ struct _ts_s {
 	/* compacted version of fields */
 	char *fields;
 
+	/* obarray for tags */
 	cots_ob_t obarray;
+
+	/* C aligned layout size, taking alignment into consideration */
+	size_t zcols;
 
 	/* scratch array, row wise */
 	uint64_t *row_scratch;
@@ -197,11 +204,46 @@ _ilen(const struct _ts_s *_s)
 	return (_s->nidx + 1U) * (sizeof(*_s->root.t) + sizeof(*_s->root.z));
 }
 
-static struct blob_s
-_make_blob(const char *flds, size_t nflds, size_t nrows,
-	   const cots_to_t *t, const cots_tag_t *m, const uint64_t *rows)
+static size_t
+_algn_zcols(const char *layout, size_t nflds)
 {
-	const size_t zrow = (nflds + 2U) * sizeof(*rows);
+/* calculate sizeof(`layout') with alignments and stuff
+ * to be used as partial summator align size of the first NFLDS fields
+ * to the alignment requirements of the NFLDS+1st field */
+	size_t z = 0U;
+
+	for (size_t i = 0U, inc = 0U; i <= nflds; i++) {
+		/* add increment from last iteration */
+		z += inc;
+
+		switch (layout[i]) {
+		case COTS_LO_BYT:
+			inc = 1U;
+			break;
+		case COTS_LO_PRC:
+		case COTS_LO_FLT:
+			/* round Z up to next 4 multiple */
+			z = ALGN4(z);
+			inc = 4U;
+			break;
+		case COTS_LO_QTY:
+		case COTS_LO_DBL:
+			/* round Z up to next 8 multiple */
+			z = ALGN8(z);
+			inc = 8U;
+			break;
+		case COTS_LO_END:
+		default:
+			break;
+		}
+	}
+	return z;
+}
+
+static struct blob_s
+_make_blob(const char *flds, size_t nflds, size_t zcols, size_t nrows,
+	   const cots_to_t *t, const cots_tag_t *m, const void *rows)
+{
 	void *cols[nflds];
 	uint8_t *buf;
 	size_t bsz;
@@ -213,7 +255,7 @@ _make_blob(const char *flds, size_t nflds, size_t nrows,
 	}
 
 	/* trial mmap */
-	bsz = 3U * zrow * nrows / 2U;
+	bsz = 3U * (sizeof(*t) + sizeof(*m) + zcols) * nrows / 2U;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
@@ -222,29 +264,39 @@ _make_blob(const char *flds, size_t nflds, size_t nrows,
 	/* columnarise */
 	for (size_t i = 0U,
 		     /* column index with some breathing space in bytes */
-		     bi = 3U * 2U * sizeof(*rows) * nrows / 2U;
+		     bi = 3U * (sizeof(*t) + sizeof(*m)) * nrows / 2U;
 	     i < nflds; i++) {
+		/* next one is a bit of a Schlemiel, we could technically
+		 * iteratively compute A, much like _algn_zcols() does it,
+		 * but this way it saves us some explaining */
+		const size_t a = _algn_zcols(flds, i);
 		cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
 
 		switch (flds[i]) {
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
 			uint32_t *c = cols[i];
+			const uint32_t *r =
+				(const uint32_t*)rows + a / sizeof(*r);
+			const size_t acols = zcols / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = rows[j * nflds + i];
+				c[j] = r[j * acols];
 			}
-			bi += nrows * sizeof(*c);
+			bi += 3U * nrows * sizeof(*c) / 2U;
 			break;
 		}
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols[i];
+			const uint64_t *r =
+				(const uint64_t*)rows + a / sizeof(*r);
+			const size_t acols = zcols / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = rows[j * nflds + i];
+				c[j] = r[j * acols];
 			}
-			bi += nrows * sizeof(*c);
+			bi += 3U * nrows * sizeof(*c) / 2U;
 			break;
 		}
 		default:
@@ -388,7 +440,7 @@ _flush(struct _ts_s *_s)
 		return 0;
 	}
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->nrows, _s->t, _s->m, rows);
+	b = _make_blob(layo, nflds, _s->zcols, _s->nrows, _s->t, _s->m, rows);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
@@ -457,13 +509,16 @@ make_cots_ts(const char *layout)
 {
 	struct _ts_s *res = calloc(1, sizeof(*res));
 	size_t laylen;
+	size_t zcols;
 
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
 		laylen = strlen(layout);
+		zcols = _algn_zcols(layout, laylen);
 	} else {
 		res->public.layout = nul_layout;
 		laylen = 0U;
+		zcols = 0U;
 	}
 
 	/* store layout length as nfields */
@@ -474,6 +529,8 @@ make_cots_ts(const char *layout)
 		res->row_scratch = calloc(laylen * NSAMP, sizeof(uint64_t));
 	}
 	res->obarray = make_cots_ob();
+
+	res->zcols = zcols;
 
 	/* use a backing file? */
 	res->fd = -1;
@@ -556,6 +613,8 @@ cots_open_ts(const char *file, int flags)
 		res->public.layout = layo;
 		/* determine nflds */
 		nflds = eo - layo;
+		/* determine aligned size */
+		res->zcols = _algn_zcols(layo, nflds);
 	}
 
 	/* make number of fields known publicly */
@@ -835,8 +894,7 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 	_s->t[_s->nrows] = data->toff;
 	_s->m[_s->nrows] = data->tag;
 
-	memcpy(&_s->row_scratch[_s->nrows * nflds],
-	       data->value, nflds * sizeof(uint64_t));
+	memcpy(&_s->row_scratch[_s->nrows * nflds], data->value, _s->zcols);
 
 	if (UNLIKELY(++_s->nrows == NSAMP)) {
 		/* auto-eviction */
