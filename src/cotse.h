@@ -106,7 +106,7 @@ typedef struct cots_ts_s {
 struct cots_tick_s {
 	cots_to_t toff;
 	cots_tag_t tag;
-	char value[];
+	uint8_t value[];
 };
 
 /**
