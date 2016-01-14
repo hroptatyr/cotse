@@ -301,6 +301,45 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 }
 
 static int
+_add_idxs(struct _ts_s *_s)
+{
+	const size_t nidx = _s->nidx;
+	off_t beg;
+	off_t end;
+	uint64_t *m;
+
+	if (_s->fd < 0) {
+		return 0;
+	}
+
+	/* otherwise the backing file present */
+	beg = ALGN16(_s->root.z[nidx]);
+	end = beg + (nidx + 1U) * (sizeof(*_s->root.t) + sizeof(*_s->root.z));
+	if (UNLIKELY(ftruncate(_s->fd, end) < 0)) {
+		/* FUCCCK, we might as well hang ourself */
+		return -1;
+	}
+	/* mmap the blob in the file */
+	m = mmap_any(_s->fd, PROT_WRITE, MAP_SHARED, beg, end - beg);
+	if (UNLIKELY(m == MAP_FAILED)) {
+		/* this is a fucking disaster */
+		return -1;
+	}
+	/* bang stamps, then sizes, big-endian */
+	for (size_t i = 0U; i <= nidx; i++) {
+		m[i] = htobe64(_s->root.t[i]);
+	}
+	for (size_t i = 0U; i <= nidx; i++) {
+		m[nidx + i] = htobe64(_s->root.z[i]);
+	}
+	/* make sure it's on disk, aye */
+	(void)msync_any(m, beg, end - beg, MS_ASYNC);
+	/* unmap him right away */
+	munmap(m, end - beg);
+	return 0;
+}
+
+static int
 _flush_hdr(const struct _ts_s *_s)
 {
 	const size_t nflds = _s->public.nfields;
@@ -349,7 +388,7 @@ _flush(struct _ts_s *_s)
 	_add_blob(_s, b);
 
 	/* write out indices */
-	;
+	_add_idxs(_s);
 
 	/* update header */
 	_flush_hdr(_s);
