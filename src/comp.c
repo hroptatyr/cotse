@@ -95,4 +95,64 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 	return totz;
 }
 
+size_t
+dcmp(cots_to_t *restrict t, cots_tag_t *restrict m, void *restrict cols[],
+     size_t ncols, const char *layout, const uint8_t *src, size_t ssz)
+{
+	size_t si = 0U;
+	size_t nt;
+	size_t z;
+
+	memcpy(&z, src + si, sizeof(z));
+	si += sizeof(z);
+	nt = dcmp_to(t, src + si, z);
+	si += z;
+	if (UNLIKELY(si >= ssz)) {
+		return 0U;
+	}
+
+	memcpy(&z, src + si, sizeof(z));
+	si += sizeof(z);
+	if (dcmp_tag(m, src + si, z) != nt) {
+		return 0U;
+	}
+	si += z;
+	if (UNLIKELY(si >= ssz)) {
+		return 0U;
+	}
+
+	/* columns now */
+	for (size_t i = 0U; i < ncols; i++) {
+		switch (layout[i]) {
+		case COTS_LO_PRC:
+		case COTS_LO_FLT: {
+			uint32_t *c = cols[i];
+
+			memcpy(&z, src + si, sizeof(z));
+			si += sizeof(z);
+			if (dcmp_px(c, src + si, z) != nt) {
+				return 0U;
+			}
+			si += z;
+			break;
+		}
+		case COTS_LO_QTY:
+		case COTS_LO_DBL: {
+			uint64_t *c = cols[i];
+
+			memcpy(&z, src + si, sizeof(z));
+			si += sizeof(z);
+			if (dcmp_qx(c, src + si, z) != nt) {
+				return 0U;
+			}
+			si += z;
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	return nt;
+}
+
 /* comp.c ends here */
