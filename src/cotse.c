@@ -63,6 +63,9 @@
 #define NTIDX		(512U)
 
 #define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
+#define ALGN8(x)	((uintptr_t)((x) + 0x7U) & ~0x7ULL)
+#define ALGN4(x)	((uintptr_t)((x) + 0x3U) & ~0x3ULL)
+#define ALGN2(x)	((uintptr_t)((x) + 0x1U) & ~0x1ULL)
 
 /* file header, mmapped for convenience */
 struct fhdr_s {
@@ -101,7 +104,11 @@ struct _ts_s {
 	/* compacted version of fields */
 	char *fields;
 
+	/* obarray for tags */
 	cots_ob_t obarray;
+
+	/* C aligned layout size, taking alignment into consideration */
+	size_t zcols;
 
 	/* scratch array, row wise */
 	uint64_t *row_scratch;
@@ -195,6 +202,45 @@ _ilen(const struct _ts_s *_s)
 {
 /* calculate index length */
 	return (_s->nidx + 1U) * (sizeof(*_s->root.t) + sizeof(*_s->root.z));
+}
+
+static size_t
+_algn_zcols(const char *layout, size_t nflds)
+{
+	size_t cnt[] = {0U, 0U, 0U, 0U};
+	size_t zcols;
+
+	for (size_t i = 0U; i < nflds; i++) {
+		switch (layout[i]) {
+		case COTS_LO_BYT:
+			cnt[0U/*2^0*/]++;
+			break;
+		case COTS_LO_PRC:
+		case COTS_LO_FLT:
+			/* round cnt[i] up to next 4/2^i multiple */
+			cnt[0U/*2^0*/] += ALGN4(cnt[0U]);
+			cnt[1U/*2^1*/] += ALGN2(cnt[1U]);
+			cnt[2U/*2^2*/]++;
+			break;
+		case COTS_LO_QTY:
+		case COTS_LO_DBL:
+			/* round cnt[i] up to next 8/2^i multiple */
+			cnt[0U/*2^0*/] += ALGN8(cnt[0U]);
+			cnt[1U/*2^1*/] += ALGN4(cnt[1U]);
+			cnt[2U/*2^2*/] += ALGN2(cnt[2U]);
+			cnt[3U/*2^3*/]++;
+			break;
+		default:
+			break;
+		}
+	}
+	/* calc the linear combination */
+	zcols = 0U;
+	zcols += cnt[0U] << 0U;
+	zcols += cnt[1U] << 1U;
+	zcols += cnt[2U] << 2U;
+	zcols += cnt[3U] << 3U;
+	return zcols;
 }
 
 static struct blob_s
@@ -457,13 +503,16 @@ make_cots_ts(const char *layout)
 {
 	struct _ts_s *res = calloc(1, sizeof(*res));
 	size_t laylen;
+	size_t zcols;
 
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
 		laylen = strlen(layout);
+		zcols = _algn_zcols(layout, laylen);
 	} else {
 		res->public.layout = nul_layout;
 		laylen = 0U;
+		zcols = 0U;
 	}
 
 	/* store layout length as nfields */
@@ -474,6 +523,8 @@ make_cots_ts(const char *layout)
 		res->row_scratch = calloc(laylen * NSAMP, sizeof(uint64_t));
 	}
 	res->obarray = make_cots_ob();
+
+	res->zcols = zcols;
 
 	/* use a backing file? */
 	res->fd = -1;
@@ -556,6 +607,8 @@ cots_open_ts(const char *file, int flags)
 		res->public.layout = layo;
 		/* determine nflds */
 		nflds = eo - layo;
+		/* determine aligned size */
+		res->zcols = _algn_zcols(layo, nflds);
 	}
 
 	/* make number of fields known publicly */
