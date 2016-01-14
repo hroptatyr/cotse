@@ -411,6 +411,45 @@ _flush(struct _ts_s *_s)
 	return -1;
 }
 
+static int
+_rd_idx(struct _ts_s *_s)
+{
+	off_t ioff;
+	off_t ooff;
+	uint64_t *m;
+	size_t nidx;
+
+	if (UNLIKELY(_s->fd < 0)) {
+		/* read whence? */
+		return -1;
+	}
+
+	/* poke the header to tell us them numbers */
+	ioff = be64toh(_s->mdr->ioff);
+	ooff = be64toh(_s->mdr->ooff);
+
+	/* map that */
+	m = mmap_any(_s->fd, PROT_READ, MAP_PRIVATE, ioff, ooff - ioff);
+	if (UNLIKELY(m == NULL)) {
+		return -1;
+	}
+	/* determine nidx */
+	nidx = (ooff - ioff) / (sizeof(*_s->root.t) + sizeof(*_s->root.z)) - 1U;
+
+	/* copy stuff to our index structure */
+	for (size_t i = 0U; i <= nidx; i++) {
+		_s->root.t[i] = be64toh(m[i]);
+	}
+	for (size_t i = 0U; i <= nidx; i++) {
+		_s->root.z[i] = be64toh(m[nidx + 1U + i]);
+	}
+	/* good effort */
+	munmap_any(m, ioff, ooff - ioff);
+	/* lest we forget about nidx */
+	_s->nidx = nidx;
+	return 0;
+}
+
 
 /* public API */
 cots_ts_t
@@ -532,6 +571,8 @@ cots_open_ts(const char *file, int flags)
 			goto fre_out;
 		}
 	}
+	/* now read them indices */
+	_rd_idx(res);
 
 	/* use a backing file */
 	return (cots_ts_t)res;
