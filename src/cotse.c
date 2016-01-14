@@ -509,11 +509,7 @@ cots_open_ts(const char *file, int flags)
 int
 cots_close_ts(cots_ts_t s)
 {
-	struct _ts_s *_s = (void*)s;
-
-	if (LIKELY(_s->fd >= 0)) {
-		close(_s->fd);
-	}
+	cots_detach(s);
 	free_cots_ts(s);
 	return 0;
 }
