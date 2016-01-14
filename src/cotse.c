@@ -185,7 +185,7 @@ static struct blob_s
 _make_blob(const char *flds, size_t nflds, size_t nrows,
 	   const cots_to_t *t, const cots_tag_t *m, const uint64_t *rows)
 {
-#define ALGN16(x)	(void*)((uintptr_t)((x) + 0xfU) & ~0xfULL)
+#define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
 	const size_t zrow = (nflds + 2U) * sizeof(*rows);
 	void *cols[nflds];
 	uint8_t *buf;
@@ -209,7 +209,7 @@ _make_blob(const char *flds, size_t nflds, size_t nrows,
 		     /* column index with some breathing space in bytes */
 		     bi = 3U * 2U * sizeof(*rows) * nrows / 2U;
 	     i < nflds; i++) {
-		cols[i] = ALGN16(buf + bi + sizeof(z));
+		cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
 
 		switch (flds[i]) {
 		case COTS_LO_PRC:
@@ -260,11 +260,9 @@ mun_out:
 static int
 _add_blob(struct _ts_s *_s, struct blob_s b)
 {
-	size_t k = _s->nidx;
-
 	if (_s->fd >= 0) {
 		/* backing file present */
-		off_t beg = _s->root.z[k + 0U];
+		off_t beg = _s->root.z[_s->nidx];
 		uint8_t *m;
 
 		if (UNLIKELY(ftruncate(_s->fd, beg + b.z) < 0)) {
@@ -290,13 +288,13 @@ _add_blob(struct _ts_s *_s, struct blob_s b)
 	}
 
 	/* store in index */
-	_s->root.t[k + 0U] = b.from;
+	_s->root.t[_s->nidx + 0U] = b.from;
 	/* best effort to guess the next index's timestamp */
-	_s->root.t[k + 1U] = b.till;
+	_s->root.t[_s->nidx + 1U] = b.till;
 	/* store offsets, cumsum of sizes */
-	_s->root.z[k + 1U] = _s->root.z[k + 0U] + b.z;
+	_s->root.z[_s->nidx + 1U] = _s->root.z[_s->nidx + 0U] + b.z;
 	/* store pointer */
-	_s->pidx[k + 0U] = b.data;
+	_s->pidx[_s->nidx + 0U] = b.data;
 	/* advance number of indices */
 	_s->nidx++;
 	return 0;
