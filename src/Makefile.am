@@ -39,6 +39,9 @@ libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
 libcotse_la_CPPFLAGS += -D_GNU_SOURCE
 
 noinst_PROGRAMS += cotsdump
+cotsdump_SOURCES = cotsdump.c
+cotsdump_SOURCES += dfp754_d32.c dfp754_d32.h
+cotsdump_SOURCES += dfp754_d64.c dfp754_d64.h
 cotsdump_LDFLAGS = $(AM_LDFLAGS) -lm -static
 cotsdump_LDADD = libcotse.la
 

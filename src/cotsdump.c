@@ -44,8 +44,16 @@
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
+#include "dfp754_d32.h"
+#include "dfp754_d64.h"
 #include "cotse.h"
 #include "nifty.h"
+
+struct samp_s {
+	struct cots_tsoa_s proto;
+	cots_px_t *b;
+	cots_qx_t *q;
+};
 
 
 static __attribute__((format(printf, 1, 2))) void
@@ -64,6 +72,22 @@ serror(const char *fmt, ...)
 	return;
 }
 
+static void
+dump(const struct samp_s s, size_t n)
+{
+	for (size_t i = 0U; i < n; i++) {
+		char p[32U];
+		char q[64U];
+
+		d32tostr(p, sizeof(p), s.b[i]);
+		d64tostr(q, sizeof(q), s.q[i]);
+
+		printf("%lu\t%lu\t%s\t%s\n",
+		       s.proto.toffs[i], s.proto.tags[i], p, q);
+	}
+	return;
+}
+
 
 int
 main(int argc, char *argv[])
@@ -72,6 +96,8 @@ main(int argc, char *argv[])
 
 	for (int i = 1; i < argc; i++) {
 		cots_ts_t hdl;
+		struct samp_s s;
+		ssize_t n;
 
 		if ((hdl = cots_open_ts(argv[i], O_RDONLY)) == NULL) {
 			serror("Error: cannot open file `%s'", argv[i]);
@@ -79,18 +105,9 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-		while (1) {
-			struct samp_s {
-				struct cots_tsoa_s proto;
-				cots_px_t *b;
-				cots_qx_t *q;
-			} s;
-			ssize_t n;
-
-			if ((n = cots_read_ticks(&s.proto, hdl)) <= 0) {
-				break;
-			}
+		while ((n = cots_read_ticks(&s.proto, hdl)) > 0) {
 			fprintf(stderr, "got %zd ticks\n", n);
+			dump(s, n);
 			break;
 		}
 		fprintf(stderr, "%p\n", hdl);
