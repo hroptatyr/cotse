@@ -70,7 +70,7 @@
 #endif	/* !with */
 
 #if !defined if_with
-# define if_with(init, args...)					\
+# define if_with(init, args...)						\
 	for (init, *paste(__ep, __LINE__) = (void*)1;			\
 	     paste(__ep, __LINE__) && (args); paste(__ep, __LINE__)= 0)
 #endif	/* !if_with */
@@ -81,6 +81,11 @@
 #define but_first				\
 	static int paste(__, __LINE__);		\
 	if (paste(__, __LINE__)++)
+
+#define save_errno				\
+	for (int paste(__er, __LINE__) = errno, paste(__ep, __LINE__) = 1; \
+	     paste(__ep, __LINE__);					\
+	     errno = paste(__er, __LINE__), paste(__ep, __LINE__) = 0)
 
 static __inline void*
 deconst(const void *cp)

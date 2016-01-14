@@ -28,6 +28,7 @@ libcotse_la_SOURCES = cotse.c cotse.h
 libcotse_la_SOURCES += nifty.h
 libcotse_la_SOURCES += pfor.c pfor.h
 libcotse_la_SOURCES += bitpack.c bitpack.h bitpack64.h
+libcotse_la_SOURCES += comp.c comp.h
 libcotse_la_SOURCES += comp-to.c comp-to.h
 libcotse_la_SOURCES += comp-px.c comp-px.h
 libcotse_la_SOURCES += comp-qx.c comp-qx.h
@@ -37,13 +38,20 @@ libcotse_la_SOURCES += intern.c intern.h
 libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
 libcotse_la_CPPFLAGS += -D_GNU_SOURCE
 
-noinst_PROGRAMS += bla
-bla_SOURCES = bla.c
-bla_SOURCES += dfp754_d32.c dfp754_d32.h
-bla_SOURCES += dfp754_d64.c dfp754_d64.h
-bla_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
-bla_LDFLAGS = $(AM_LDFLAGS) -lm -static
-bla_LDADD = libcotse.la
+noinst_PROGRAMS += cotsdump
+cotsdump_SOURCES = cotsdump.c
+cotsdump_SOURCES += dfp754_d32.c dfp754_d32.h
+cotsdump_SOURCES += dfp754_d64.c dfp754_d64.h
+cotsdump_LDFLAGS = $(AM_LDFLAGS) -lm -static
+cotsdump_LDADD = libcotse.la
+
+noinst_PROGRAMS += cotspump
+cotspump_SOURCES = cotspump.c
+cotspump_SOURCES += dfp754_d32.c dfp754_d32.h
+cotspump_SOURCES += dfp754_d64.c dfp754_d64.h
+cotspump_CPPFLAGS = $(AM_CPPFLAGS) -D_GNU_SOURCE
+cotspump_LDFLAGS = $(AM_LDFLAGS) -lm -static
+cotspump_LDADD = libcotse.la
 
 
 ## version rules

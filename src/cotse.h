@@ -86,8 +86,10 @@ typedef struct cots_ts_s {
 	 * see COTS_LO_* definitions for details.
 	 * Unsupported field types will be ignored. */
 	const char *layout;
-	/** Field names for documentation purposed, NULL terminated. */
+	/** Field names for documentation purposes, NULL terminated. */
 	const char *const *fields;
+	/** Currently attached file, if any. */
+	const char *filename;
 } *cots_ts_t;
 
 /* layout values */
@@ -107,6 +109,14 @@ struct cots_tick_s {
 	char value[];
 };
 
+/**
+ * User facing SoA ticks type. */
+struct cots_tsoa_s {
+	cots_to_t *toffs;
+	cots_tag_t *tags;
+	void *more[];
+};
+
 
 /* public API */
 /**
@@ -117,6 +127,22 @@ extern cots_ts_t make_cots_ts(const char *layout);
 /**
  * Free a time series object. */
 extern void free_cots_ts(cots_ts_t);
+
+/**
+ * Attach backing FILE to series. */
+extern int cots_attach(cots_ts_t, const char *file, int flags);
+
+/**
+ * Detach files from series, if any. */
+extern int cots_detach(cots_ts_t);
+
+/**
+ * Open a cots-ts file. */
+extern cots_ts_t cots_open_ts(const char *file, int flags);
+
+/**
+ * Close a cots-ts handle, the handle is unusable hereafter. */
+extern int cots_close_ts(cots_ts_t);
 
 
 /**
@@ -146,5 +172,9 @@ extern int cots_write_tick(cots_ts_t, const struct cots_tick_s*);
  * Write N data ticks to series.
  * The actual length of the tick is determined by the series' layout */
 extern int cots_write_ticks(cots_ts_t, const struct cots_tick_s*, size_t n);
+
+/**
+ * Read data tick from series, output to TGT. */
+extern ssize_t cots_read_ticks(struct cots_tsoa_s *restrict, cots_ts_t);
 
 #endif	/* INCLUDED_cotse_h_ */
