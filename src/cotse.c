@@ -207,40 +207,37 @@ _ilen(const struct _ts_s *_s)
 static size_t
 _algn_zcols(const char *layout, size_t nflds)
 {
-	size_t cnt[] = {0U, 0U, 0U, 0U};
-	size_t zcols;
+/* calculate sizeof(`layout') with alignments and stuff
+ * to be used as partial summator align size of the first NFLDS fields
+ * to the alignment requirements of the NFLDS+1st field */
+	size_t z = 0U;
 
-	for (size_t i = 0U; i < nflds; i++) {
+	for (size_t i = 0U, inc = 0U; i <= nflds; i++) {
+		/* add increment from last iteration */
+		z += inc;
+
 		switch (layout[i]) {
 		case COTS_LO_BYT:
-			cnt[0U/*2^0*/]++;
+			inc = 1U;
 			break;
 		case COTS_LO_PRC:
 		case COTS_LO_FLT:
-			/* round cnt[i] up to next 4/2^i multiple */
-			cnt[0U/*2^0*/] = ALGN4(cnt[0U]);
-			cnt[1U/*2^1*/] = ALGN2(cnt[1U]);
-			cnt[2U/*2^2*/]++;
+			/* round Z up to next 4 multiple */
+			z = ALGN4(z);
+			inc = 4U;
 			break;
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
-			/* round cnt[i] up to next 8/2^i multiple */
-			cnt[0U/*2^0*/] = ALGN8(cnt[0U]);
-			cnt[1U/*2^1*/] = ALGN4(cnt[1U]);
-			cnt[2U/*2^2*/] = ALGN2(cnt[2U]);
-			cnt[3U/*2^3*/]++;
+			/* round Z up to next 8 multiple */
+			z = ALGN8(z);
+			inc = 8U;
 			break;
+		case COTS_LO_END:
 		default:
 			break;
 		}
 	}
-	/* calc the linear combination */
-	zcols = 0U;
-	zcols += cnt[0U] << 0U;
-	zcols += cnt[1U] << 1U;
-	zcols += cnt[2U] << 2U;
-	zcols += cnt[3U] << 3U;
-	return zcols;
+	return z;
 }
 
 static struct blob_s
@@ -269,6 +266,9 @@ _make_blob(const char *flds, size_t nflds, size_t zcols, size_t nrows,
 		     /* column index with some breathing space in bytes */
 		     bi = 3U * (sizeof(*t) + sizeof(*m)) * nrows / 2U;
 	     i < nflds; i++) {
+		/* next one is a bit of a Schlemiel, we could technically
+		 * iteratively compute A, much like _algn_zcols() does it,
+		 * but this way it saves us some explaining */
 		const size_t a = _algn_zcols(flds, i);
 		cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
 
