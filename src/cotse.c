@@ -328,8 +328,8 @@ _add_idxs(struct _ts_s *_s)
 	}
 
 	/* otherwise the backing file present */
-	beg = ALGN16(_s->root.z[nidx]);
-	end = beg + (nidx + 1U) * (sizeof(*_s->root.t) + sizeof(*_s->root.z));
+	beg = _ioff(_s);
+	end = beg + _ilen(_s);
 	if (UNLIKELY(ftruncate(_s->fd, end) < 0)) {
 		/* FUCCCK, we might as well hang ourself */
 		return -1;
@@ -367,10 +367,9 @@ _flush_hdr(const struct _ts_s *_s)
 		return 0;
 	}
 	/* otherwise */
-	with (size_t blobz = _s->root.z[_s->nidx],
-	      indez = _s->nidx * (sizeof(*_s->root.t) + sizeof(*_s->root.z))) {
-		_s->mdr->ioff = htobe64(blobz + 0U);
-		_s->mdr->ooff = htobe64(blobz + indez);
+	with (off_t ioff = _ioff(_s)) {
+		_s->mdr->ioff = htobe64(_ioff(_s));
+		_s->mdr->ooff = htobe64(ioff + _ilen(_s));
 	}
 	msync_any(_s->mdr, 0U, sizeof(*_s->mdr) + nflds + 1U, MS_ASYNC);
 	return 0;
