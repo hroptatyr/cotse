@@ -42,19 +42,19 @@
 static inline unsigned int
 bsr16(uint16_t x)
 {
-	return x ? 16U - __builtin_clz(x) : 0U;
+	return (1U + (15U ^ __builtin_clz(x))) & 15U;
 }
 
 static inline unsigned int
 bsr32(uint32_t x)
 {
-	return x ? 32U - __builtin_clz(x) : 0U;
+	return (1U + (31U ^ __builtin_clz(x))) & 31U;
 }
 
 static inline unsigned int
 bsr64(uint64_t x)
 {
-	return x ? 64U - __builtin_clzl(x) : 0U;
+	return (1U + (63U ^ __builtin_clzl(x))) & 63U;
 }
 
 #if defined __INTEL_COMPILER && defined __SSE4_2__
