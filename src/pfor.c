@@ -177,7 +177,7 @@ _calc(const uint_t *restrict in, size_t n, unsigned int *pbx)
 	case 0U:
 		break;
 	}
-	b = bsr(b); 
+	b = bsr32(b);
 
 	bx = b;
 	ml = PAD8(n * b) + 1 - 2 - P4DN * 8U;
