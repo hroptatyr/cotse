@@ -159,7 +159,7 @@ _calc(const uint_t *restrict in, size_t n, unsigned int *pbx)
 	const uint_t *ip;
 	uint_t b = 0U;
 	int ml, l;
-	unsigned int x, bx, cnt[USIZE+1] = {0}; 
+	unsigned int x, bx, cnt[USIZE + 1U] = {0U};
   
 	for (ip = in; ip != in + (n & ~3ULL);) {
 		cnt[bsr(*ip)]++, b |= *ip++;
