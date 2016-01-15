@@ -42,19 +42,19 @@
 static inline unsigned int
 bsr16(uint16_t x)
 {
-	return x ? 16U - __builtin_clz(x) : 0U;
+	return (1U + (15U ^ (__builtin_clz(x) - 16U))) & 31U;
 }
 
 static inline unsigned int
 bsr32(uint32_t x)
 {
-	return x ? 32U - __builtin_clz(x) : 0U;
+	return (1U + (31U ^ __builtin_clz(x))) & 63U;
 }
 
 static inline unsigned int
 bsr64(uint64_t x)
 {
-	return x ? 64U - __builtin_clzl(x) : 0U;
+	return (1U + (63U ^ __builtin_clzl(x))) & 127U;
 }
 
 #if defined __INTEL_COMPILER && defined __SSE4_2__
@@ -159,9 +159,9 @@ _calc(const uint_t *restrict in, size_t n, unsigned int *pbx)
 	const uint_t *ip;
 	uint_t b = 0U;
 	int ml, l;
-	unsigned int x, bx, cnt[USIZE+1] = {0}; 
+	unsigned int x, bx, cnt[USIZE + 1U] = {0U};
   
-	for (ip = in; ip != in + (n & ~3);) {
+	for (ip = in; ip != in + (n & ~3ULL);) {
 		cnt[bsr(*ip)]++, b |= *ip++;
 		cnt[bsr(*ip)]++, b |= *ip++;
 		cnt[bsr(*ip)]++, b |= *ip++;

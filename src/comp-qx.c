@@ -73,69 +73,30 @@ xort(uint64_t *restrict tgt, const uint64_t *restrict src, size_t np)
 	return;
 }
 
-static void
-rolt(uint64_t *restrict io, size_t np)
-{
-	for (size_t i = 0U; i < np; i++) {
-		/* rol it */
-		io[i] = (io[i] << 1U) ^ (io[i] >> 63U);
-	}
-	return;
-}
-
-static void
-rort(uint64_t *restrict io, size_t np)
-{
-	for (size_t i = 0U; i < np; i++) {
-		/* ror it */
-		io[i] = (io[i] >> 1U) ^ (io[i] << 63U);
-	}
-	return;
-}
-
-static uint64_t
-rotmap(const uint64_t *v, size_t n)
-{
-/* count the number of set signum bits in V
- * in blocks of MAX_NP / 64U (which hopefully coincides with pfor.c's P4DSIZE)
- * return a 64bit word with the i-th bit set when block i should be
- * rotated, i.e. there's at least one value with the signum bits set. */
-	uint64_t r = 0U;
-
-	for (size_t b = 0U; b < 64U && b * ROTBLK + ROTBLK < n; b++) {
-		uint64_t ns = 0U;
-
-		for (size_t i = b * ROTBLK; i < b * ROTBLK + ROTBLK; i++) {
-			ns |= v[i] >> 31U;
-		}
-
-		/* set bit when there's more than 12.5% of signa set */
-		r ^= (ns & 0b1U) << b;
-	}
-	return r;
-}
-
 
 static size_t
 _comp(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np)
 {
 	uint64_t pd[MAX_NP];
-	uint64_t rm = 0U;
+	/* split up the results in batches of 16bits */
+	uint16_t nibl[sizeof(pd) / sizeof(uint16_t)];
 	size_t z = 0U;
 
 	/* deltaify */
 	xodt(pd, qx, np);
-	/* number of sign changes */
-	rm = rotmap(pd, np);
-	for (unsigned int b = 0U; b < 64U; b++) {
-		if (UNLIKELY((rm >> b) & 0b1U)) {
-			rolt(pd + b * ROTBLK, ROTBLK);
-		}
+
+	/* nibblify */
+	for (size_t i = 0U; i < np; i++) {
+		nibl[i + 0U * MAX_NP] = (uint16_t)((pd[i] >> 0U));
+		nibl[i + 1U * MAX_NP] = (uint16_t)((pd[i] >> 16U));
+		nibl[i + 2U * MAX_NP] = (uint16_t)((pd[i] >> 32U));
+		nibl[i + 3U * MAX_NP] = (uint16_t)((pd[i] >> 48U));
 	}
-	/* zigzag indicator (or flags in general) first */
-	memcpy(tgt, &rm, sizeof(rm));
-	z += sizeof(rm);
-	z += pfor_enc64(tgt + z, pd, np);
+
+	z += pfor_enc16(tgt + z, nibl + 0U * MAX_NP, np);
+	z += pfor_enc16(tgt + z, nibl + 1U * MAX_NP, np);
+	z += pfor_enc16(tgt + z, nibl + 2U * MAX_NP, np);
+	z += pfor_enc16(tgt + z, nibl + 3U * MAX_NP, np);
 	return z;
 }
 
@@ -143,21 +104,23 @@ static size_t
 _dcmp(uint64_t *restrict tgt, size_t np, const uint8_t *restrict c, size_t z)
 {
 	uint64_t pd[MAX_NP];
+	uint16_t nibl[sizeof(pd) / sizeof(uint16_t)];
 	size_t ci = 0U;
-	uint64_t rm;
 	(void)z;
 
-	/* snarf flags, currently only zigzag */
-	memcpy(&rm, c, sizeof(rm));
-	ci += sizeof(rm);
-	ci += pfor_dec64(pd, c + ci, np);
+	ci += pfor_dec16(nibl + 0U * MAX_NP, c + ci, np);
+	ci += pfor_dec16(nibl + 1U * MAX_NP, c + ci, np);
+	ci += pfor_dec16(nibl + 2U * MAX_NP, c + ci, np);
+	ci += pfor_dec16(nibl + 3U * MAX_NP, c + ci, np);
 
-	/* use rotmap to unrotate things */
-	for (unsigned int b = 0U; b < 64U; b++) {
-		if (UNLIKELY((rm >> b) & 0b1U)) {
-			rort(pd + b * ROTBLK, ROTBLK);
-		}
+	/* reassemble 64bit words */
+	for (size_t i = 0U; i < np; i++) {
+		pd[i] = (uint64_t)nibl[i + 0U * MAX_NP];
+		pd[i] ^= (uint64_t)nibl[i + 1U * MAX_NP] << 16U;
+		pd[i] ^= (uint64_t)nibl[i + 2U * MAX_NP] << 32U;
+		pd[i] ^= (uint64_t)nibl[i + 3U * MAX_NP] << 48U;
 	}
+
 	/* and cumsum the whole thing */
 	xort(tgt, pd, np);
 	return ci;
