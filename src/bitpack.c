@@ -43,7 +43,7 @@
 size_t
 bitpack16(uint8_t *restrict out, const uint16_t *restrict in, size_t n, unsigned int nbits)
 {
-	BITPACK32(in, n, nbits, out, 0);
+	BITPACK16(in, n, nbits, out, 0);
 	return PAD8(n * nbits);
 }
 
@@ -64,7 +64,7 @@ bitpack64(uint8_t *restrict out, const uint64_t *restrict in, size_t n, unsigned
 size_t
 bitunpack16(uint16_t *restrict out, const uint8_t *restrict in, size_t n, unsigned int nbits)
 {
-	BITUNPACK32(in, n, nbits, out, 0);
+	BITUNPACK16(in, n, nbits, out, 0);
 	return PAD8(n * nbits);
 }
 
@@ -94,6 +94,29 @@ bitunpack64(uint64_t *restrict out, const uint8_t *restrict in, size_t n, unsign
 #include <stdint.h>
 #include "bitpack64.h"
 #define SRCI(__ip)
+
+#define BITPACK16(__ip, __n, __nbits, __op, __parm) {			\
+  const typeof(__ip[0]) *_ipe=(__ip)+(__n);/*((__n+31)&0xffffffe0u)*/;  \
+  switch(__nbits) {\
+    case  0:__ip = _ipe; break;\
+    case  1:do BITPACK64_1( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  2:do BITPACK64_2( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  3:do BITPACK64_3( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  4:do BITPACK64_4( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  5:do BITPACK64_5( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  6:do BITPACK64_6( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  7:do BITPACK64_7( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  8:do BITPACK64_8( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case  9:do BITPACK64_9( __ip, __op, __parm) while(__ip < _ipe); break;\
+    case 10:do BITPACK64_10(__ip, __op, __parm) while(__ip < _ipe); break;\
+    case 11:do BITPACK64_11(__ip, __op, __parm) while(__ip < _ipe); break;\
+    case 12:do BITPACK64_12(__ip, __op, __parm) while(__ip < _ipe); break;\
+    case 13:do BITPACK64_13(__ip, __op, __parm) while(__ip < _ipe); break;\
+    case 14:do BITPACK64_14(__ip, __op, __parm) while(__ip < _ipe); break;\
+    case 15:do BITPACK64_15(__ip, __op, __parm) while(__ip < _ipe); break;\
+    case 16:do BITPACK64_16(__ip, __op, __parm) while(__ip < _ipe); break;\
+  }\
+}
 
 #define BITPACK32(__ip, __n, __nbits, __op, __parm) {			\
   const typeof(__ip[0]) *_ipe=(__ip)+(__n);/*((__n+31)&0xffffffe0u)*/;  \
@@ -207,6 +230,28 @@ bitunpack64(uint64_t *restrict out, const uint8_t *restrict in, size_t n, unsign
 
 
 #define DST( __op, __x, __w, __parm)	*__op++ = BPI(__w, __x, __parm)
+
+#define BITUNPACK16(__ip, __n, __nbits, __op, __parm) { typeof(__op[0]) *__ope = __op + __n,*_op=__op;\
+  switch(__nbits) {\
+    case  0: do BITUNPACK64_0( __ip, __op, __parm) while(__op<__ope); break;\
+    case  1: do BITUNPACK64_1( __ip, __op, __parm) while(__op<__ope); break;\
+    case  2: do BITUNPACK64_2( __ip, __op, __parm) while(__op<__ope); break;\
+    case  3: do BITUNPACK64_3( __ip, __op, __parm) while(__op<__ope); break;\
+    case  4: do BITUNPACK64_4( __ip, __op, __parm) while(__op<__ope); break;\
+    case  5: do BITUNPACK64_5( __ip, __op, __parm) while(__op<__ope); break;\
+    case  6: do BITUNPACK64_6( __ip, __op, __parm) while(__op<__ope); break;\
+    case  7: do BITUNPACK64_7( __ip, __op, __parm) while(__op<__ope); break;\
+    case  8: do BITUNPACK64_8( __ip, __op, __parm) while(__op<__ope); break;\
+    case  9: do BITUNPACK64_9( __ip, __op, __parm) while(__op<__ope); break;\
+    case 10: do BITUNPACK64_10(__ip, __op, __parm) while(__op<__ope); break;\
+    case 11: do BITUNPACK64_11(__ip, __op, __parm) while(__op<__ope); break;\
+    case 12: do BITUNPACK64_12(__ip, __op, __parm) while(__op<__ope); break;\
+    case 13: do BITUNPACK64_13(__ip, __op, __parm) while(__op<__ope); break;\
+    case 14: do BITUNPACK64_14(__ip, __op, __parm) while(__op<__ope); break;\
+    case 15: do BITUNPACK64_15(__ip, __op, __parm) while(__op<__ope); break;\
+    case 16: do BITUNPACK64_16(__ip, __op, __parm) while(__op<__ope); break;\
+  }\
+}
 
 #define BITUNPACK32(__ip, __n, __nbits, __op, __parm) { typeof(__op[0]) *__ope = __op + __n,*_op=__op;\
   switch(__nbits) {\
