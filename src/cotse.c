@@ -512,7 +512,7 @@ _rd_idx(struct _ts_s *_s)
 
 /* public API */
 cots_ts_t
-make_cots_ts(const char *layout)
+make_cots_ts(const char *layout, size_t blockz)
 {
 	struct _ts_s *res = calloc(1, sizeof(*res));
 	size_t laylen;
@@ -528,13 +528,16 @@ make_cots_ts(const char *layout)
 		zcols = 0U;
 	}
 
+	/* use default block size? */
+	blockz = blockz ?: 8192U;
+
 	/* store layout length as nfields and blocksize as blockz */
-	with (size_t dflt_bz = 8192U) {
+	{
 		void *nfp = deconst(&res->public.nfields);
 		void *bzp = deconst(&res->public.blockz);
 
 		memcpy(nfp, &laylen, sizeof(laylen));
-		memcpy(bzp, &dflt_bz, sizeof(dflt_bz));
+		memcpy(bzp, &blockz, sizeof(blockz));
 
 		res->row_scratch = calloc(laylen * NSAMP, sizeof(uint64_t));
 	}

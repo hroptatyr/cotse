@@ -125,8 +125,10 @@ struct cots_tsoa_s {
 /* public API */
 /**
  * Create a time series object.
- * For LAYOUT parameter see description of LAYOUT slot for cots_ts_t. */
-extern cots_ts_t make_cots_ts(const char *layout);
+ * For LAYOUT parameter see description of LAYOUT slot for cots_ts_t.
+ * For BLOCKZ parameter see description of BLOCKZ slot for cots_ts_t,
+ * when BLOCKZ is 0, the default block size will be used. */
+extern cots_ts_t make_cots_ts(const char *layout, size_t blockz);
 
 /**
  * Free a time series object. */
