@@ -132,7 +132,7 @@ main(int argc, char *argv[])
 	char *line = NULL;
 	size_t llen = 0U;
 
-	if ((db = make_cots_ts("pq")) == NULL) {
+	if ((db = make_cots_ts("pq", 0U)) == NULL) {
 		return 1;
 	}
 	cots_put_fields(db, (const char*[]){"BID", "SIZE"});
