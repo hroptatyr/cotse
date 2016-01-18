@@ -81,6 +81,8 @@ typedef struct cots_ts_s {
 	const cots_tm_t reftm;
 	/** number of fields */
 	const size_t nfields;
+	/** block size (number of ticks per page) */
+	const size_t blockz;
 	/** layout (for reference), nul-terminated
 	 * Each character represents one field type,
 	 * see COTS_LO_* definitions for details.

@@ -72,6 +72,8 @@ struct fhdr_s {
 	uint8_t magic[4U];
 	uint8_t version[2U];
 	uint16_t endian;
+	/* tba
+	 * - lowest 4bits of flags is the log2 of the block size minus 9 */
 	uint64_t flags;
 	/* offset to index pages */
 	uint64_t ioff;
@@ -410,6 +412,7 @@ static int
 _flush_hdr(const struct _ts_s *_s)
 {
 	const size_t nflds = _s->public.nfields;
+	const size_t blkz = _s->public.blockz;
 
 	if (UNLIKELY(_s->fd < 0)) {
 		/* no need */
@@ -417,6 +420,10 @@ _flush_hdr(const struct _ts_s *_s)
 	} else if (UNLIKELY(_s->mdr == NULL)) {
 		/* great */
 		return 0;
+	}
+	/* keep track of block size */
+	with (unsigned int lgbz = __builtin_ctz(blkz) - 9U) {
+		_s->mdr->flags = htobe64(lgbz & 0xfU);
 	}
 	/* otherwise */
 	with (off_t ioff = _ioff(_s)) {
@@ -521,13 +528,17 @@ make_cots_ts(const char *layout)
 		zcols = 0U;
 	}
 
-	/* store layout length as nfields */
-	{
+	/* store layout length as nfields and blocksize as blockz */
+	with (size_t dflt_bz = 8192U) {
 		void *nfp = deconst(&res->public.nfields);
+		void *bzp = deconst(&res->public.blockz);
+
 		memcpy(nfp, &laylen, sizeof(laylen));
+		memcpy(bzp, &dflt_bz, sizeof(dflt_bz));
 
 		res->row_scratch = calloc(laylen * NSAMP, sizeof(uint64_t));
 	}
+
 	res->obarray = make_cots_ob();
 
 	res->zcols = zcols;
@@ -568,6 +579,7 @@ cots_open_ts(const char *file, int flags)
 	struct fhdr_s hdr;
 	struct stat st;
 	size_t nflds;
+	size_t blkz;
 	int fd;
 
 	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
@@ -592,6 +604,10 @@ cots_open_ts(const char *file, int flags)
 
 	if (UNLIKELY((res = calloc(1, sizeof(*res))) == NULL)) {
 		return NULL;
+	}
+	/* read block size */
+	with (uint64_t fl = be64toh(hdr.flags)) {
+		blkz = 1UL << ((fl & 0xfU) + 9U);
 	}
 	/* make backing file known */
 	res->fd = fd;
@@ -621,6 +637,11 @@ cots_open_ts(const char *file, int flags)
 	with (void *nfp = deconst(&res->public.nfields)) {
 		memcpy(nfp, &nflds, sizeof(nflds));
 	}
+	/* make blocksize known publicly */
+	with (void *bzp = deconst(&res->public.blockz)) {
+		memcpy(bzp, &blkz, sizeof(blkz));
+	}
+
 	/* get some scratch space for this one */
 	res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
 	/* map the header for reference */
