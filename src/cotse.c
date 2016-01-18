@@ -129,6 +129,11 @@ struct _ts_s {
 	uint8_t *pidx[NTIDX];
 	/* number of indices */
 	size_t nidx;
+
+	/* cursor object */
+	struct {
+		size_t si;
+	};
 };
 
 static const char nul_layout[] = "";
@@ -977,12 +982,16 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 	uint8_t *m;
 	size_t mi = 0U;
 
-	/* we need a cursor type! */
-	;
-
 	/* find offset of page and length */
-	poff = _s->root.z[0U];
-	eoff = _s->root.z[1U];
+	with (const size_t pi = _s->si / NSAMP) {
+		if (UNLIKELY(pi >= _s->nidx)) {
+			/* and reset the cursor */
+			_s->si = 0U;
+			return 0;
+		}
+		poff = _s->root.z[pi + 0U];
+		eoff = _s->root.z[pi + 1U];
+	}
 
 	if (UNLIKELY(eoff <= poff)) {
 		return -1;
@@ -1008,6 +1017,33 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 
 	/* decompress */
 	n = dcmp(tsoa, nflds, layo, m + mi, z);
+	/* set pointers to offset within page */
+	with (const size_t po = _s->si % NSAMP) {
+		/* subtract from N */
+		n -= po;
+
+		tsoa->toffs += po;
+		tsoa->tags += po;
+		for (size_t i = 0U; i < nflds; i++) {
+			switch (layo[i]) {
+			case COTS_LO_PRC:
+			case COTS_LO_FLT:
+				tsoa->more[i] = (uint32_t*)tsoa->more[i] + po;
+				break;
+			case COTS_LO_QTY:
+			case COTS_LO_DBL:
+				tsoa->more[i] = (uint64_t*)tsoa->more[i] + po;
+				break;
+			case COTS_LO_BYT:
+				tsoa->more[i] = (uint8_t*)tsoa->more[i] + po;
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	/* advance iterator */
+	_s->si += n;
 
 mun_out:
 	munmap_any(m, poff, z);

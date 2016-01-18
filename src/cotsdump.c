@@ -110,7 +110,6 @@ main(int argc, char *argv[])
 		while ((n = cots_read_ticks(&s.proto, hdl)) > 0) {
 			fprintf(stderr, "got %zd ticks\n", n);
 			dump(s, n);
-			break;
 		}
 		fprintf(stderr, "%p\n", hdl);
 		cots_close_ts(hdl);
