@@ -59,7 +59,6 @@
 # define MAP_ANON	MAP_ANONYMOUS
 #endif	/* !MAP_ANON */
 
-#define NSAMP		(8192U)
 #define NTIDX		(512U)
 
 #define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
@@ -103,7 +102,7 @@ struct pbuf_s {
 	/* tick index */
 	size_t rowi;
 	/* data */
-	void *data;
+	uint8_t *data;
 };
 
 struct _ts_s {
@@ -120,10 +119,6 @@ struct _ts_s {
 
 	/* row-oriented page buffer */
 	struct pbuf_s pb;
-
-	/* provision for NSAMP timestamps and tags */
-	cots_to_t t[NSAMP];
-	cots_tag_t m[NSAMP];
 
 	/* currently attached file and its opening flags */
 	int fd;
@@ -884,25 +879,33 @@ cots_put_fields(cots_ts_t s, const char **fields)
 
 
 int
-cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
+cots_write_va(cots_ts_t s, ...)
 {
 	struct _ts_s *_s = (void*)s;
+	const char *flds = _s->public.layout;
 	va_list vap;
 
-	_s->t[_s->pb.rowi] = t;
-	_s->m[_s->pb.rowi] = m;
-	va_start(vap, m);
-	for (size_t i = 0U, n = _s->public.nfields,
-		     row = _s->pb.rowi * n; i < n; i++) {
+	va_start(vap, s);
+	for (size_t i = 0U, n = _s->public.nfields; i < n; i++) {
+		/* next one is a bit of a Schlemiel, we could technically
+		 * iteratively compute A, much like _algn_zrow() does it,
+		 * but this way it saves us some explaining */
+		const size_t a = _algn_zrow(flds, i);
+		uint8_t *rp = _s->pb.data + _s->pb.rowi * _s->pb.zrow;
+
 		switch (_s->public.layout[i]) {
 		case COTS_LO_PRC:
-		case COTS_LO_FLT:
-			_s->pb.data[row + i] = va_arg(vap, uint32_t);
+		case COTS_LO_FLT: {
+			uint32_t *cp = (uint32_t*)(rp + a);
+			*cp = va_arg(vap, uint32_t);
 			break;
+		}
 		case COTS_LO_QTY:
-		case COTS_LO_DBL:
-			_s->pb.data[row + i] = va_arg(vap, uint64_t);
+		case COTS_LO_DBL: {
+			uint64_t *cp = (uint64_t*)(rp + a);
+			*cp = va_arg(vap, uint64_t);
 			break;
+		}
 		default:
 			break;
 		}
@@ -920,13 +923,9 @@ int
 cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 {
 	struct _ts_s *_s = (void*)s;
-	const size_t nflds = _s->public.nfields;
 	const size_t blkz = _s->public.blockz;
 
-	_s->t[_s->pb.rowi] = data->toff;
-	_s->m[_s->pb.rowi] = data->tag;
-
-	memcpy(&_s->pb.data[_s->pb.rowi * nflds], data->value, _s->pb.zrow);
+	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data->value, _s->pb.zrow);
 
 	if (UNLIKELY(++_s->pb.rowi == blkz)) {
 		/* auto-eviction */
@@ -940,6 +939,7 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 {
 	struct _ts_s *_s = (void*)s;
 	const size_t nflds = _s->public.nfields;
+	const size_t blkz = _s->public.blockz;
 	const char *layo = _s->public.layout;
 	size_t n = 0U;
 	size_t z;
@@ -972,14 +972,12 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 	}
 
 	/* setup result soa */
-	tsoa->toffs = _s->t;
-	tsoa->tags = _s->m;
 	for (size_t i = 0U; i < nflds; i++) {
-		tsoa->more[i] = _s->pb.data + i * NSAMP;
+		tsoa->more[i] = _s->pb.data + i * blkz * sizeof(uint64_t);
 	}
 
 	/* decompress */
-	n = dcmp(_s->t, _s->m, tsoa->more, nflds, layo, m + mi, z);
+	n = dcmp(NULL, NULL, tsoa->more, nflds, layo, m + mi, z);
 
 mun_out:
 	munmap_any(m, poff, z);

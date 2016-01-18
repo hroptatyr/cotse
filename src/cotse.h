@@ -167,7 +167,7 @@ extern int cots_put_fields(cots_ts_t, const char **fields);
  * Use TO parameter to record time offset.
  * Use TAG argument to tag this sample.
  * Optional arguments should coincide with the layout of the timeseries. */
-extern int cots_write_va(cots_ts_t, cots_to_t, cots_tag_t, ...);
+extern int cots_write_va(cots_ts_t, ...);
 
 /**
  * Write data tick to series.
