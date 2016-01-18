@@ -227,6 +227,8 @@ _algn_zrow(const char *layout, size_t nflds)
 			z = ALGN4(z);
 			inc = 4U;
 			break;
+		case COTS_LO_TIM:
+		case COTS_LO_TAG:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
 			/* round Z up to next 8 multiple */
@@ -249,9 +251,11 @@ _make_pbuf(size_t zrow, size_t blkz)
 }
 
 static struct blob_s
-_make_blob(const char *flds, size_t nflds, const cots_tag_t *t, const cots_tag_t *m, struct pbuf_s pb)
+_make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 {
 	void *cols[nflds];
+	/* since we're indexing by time (only) keep track of times */
+	cots_to_t *tc = NULL;
 	uint8_t *buf;
 	size_t nrows;
 	size_t bsz;
@@ -291,6 +295,10 @@ _make_blob(const char *flds, size_t nflds, const cots_tag_t *t, const cots_tag_t
 			bi += 3U * nrows * sizeof(*c) / 2U;
 			break;
 		}
+		case COTS_LO_TIM:
+			tc = cols[i];
+			fprintf(stderr, "tc %p\n", tc);
+		case COTS_LO_TAG:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols[i];
@@ -310,7 +318,7 @@ _make_blob(const char *flds, size_t nflds, const cots_tag_t *t, const cots_tag_t
 	}
 
 	/* call the compactor */
-	z = comp(buf + sizeof(z), nflds, nrows, flds, t, m, cols);
+	z = comp(buf + sizeof(z), nflds, nrows, flds, cols);
 	memcpy(buf, &z, sizeof(z));
 	z += sizeof(z);
 
@@ -322,7 +330,7 @@ _make_blob(const char *flds, size_t nflds, const cots_tag_t *t, const cots_tag_t
 		}
 		buf = blo;
 	}
-	return (struct blob_s){z, buf, t[0U], t[pb.rowi - 1U]};
+	return (struct blob_s){z, buf, tc[0U], tc[0U]};
 
 mun_out:
 	munmap(buf, bsz);
@@ -449,7 +457,7 @@ _flush(struct _ts_s *_s)
 		return 0;
 	}
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, NULL, NULL, _s->pb);
+	b = _make_blob(layo, nflds, _s->pb);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
@@ -900,6 +908,8 @@ cots_write_va(cots_ts_t s, ...)
 			*cp = va_arg(vap, uint32_t);
 			break;
 		}
+		case COTS_LO_TIM:
+		case COTS_LO_TAG:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *cp = (uint64_t*)(rp + a);
@@ -925,7 +935,7 @@ cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 	struct _ts_s *_s = (void*)s;
 	const size_t blkz = _s->public.blockz;
 
-	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data->value, _s->pb.zrow);
+	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
 
 	if (UNLIKELY(++_s->pb.rowi == blkz)) {
 		/* auto-eviction */
@@ -941,6 +951,7 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 	const size_t nflds = _s->public.nfields;
 	const size_t blkz = _s->public.blockz;
 	const char *layo = _s->public.layout;
+	void **_soa = (void**)&tsoa;
 	size_t n = 0U;
 	size_t z;
 	off_t poff;
@@ -973,11 +984,11 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 
 	/* setup result soa */
 	for (size_t i = 0U; i < nflds; i++) {
-		tsoa->more[i] = _s->pb.data + i * blkz * sizeof(uint64_t);
+		_soa[i] = _s->pb.data + i * blkz * sizeof(uint64_t);
 	}
 
 	/* decompress */
-	n = dcmp(NULL, NULL, tsoa->more, nflds, layo, m + mi, z);
+	n = dcmp(_soa, nflds, layo, m + mi, z);
 
 mun_out:
 	munmap_any(m, poff, z);

@@ -54,18 +54,10 @@
 
 size_t
 comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
-     const cots_to_t *to, const cots_tag_t *tag, void *const cols[])
+     void *const cols[])
 {
 	size_t totz = 0U;
 	size_t z;
-
-	z = comp_to(tgt + totz + sizeof(z), to, nrows);
-	memcpy(tgt + totz, &z, sizeof(z));
-	totz += z + sizeof(z);
-
-	z = comp_tag(tgt + totz + sizeof(z), tag, nrows);
-	memcpy(tgt + totz, &z, sizeof(z));
-	totz += z + sizeof(z);
 
 	/* columns now */
 	for (size_t i = 0U; i < ncols; i++) {
@@ -79,6 +71,25 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 			totz += z + sizeof(z);
 			break;
 		}
+
+		case COTS_LO_TIM: {
+			cots_to_t *c = cols[i];
+
+			z = comp_to(tgt + totz + sizeof(z), c, nrows);
+			memcpy(tgt + totz, &z, sizeof(z));
+			totz += z + sizeof(z);
+			break;
+		}
+
+		case COTS_LO_TAG: {
+			cots_tag_t *c = cols[i];
+
+			z = comp_tag(tgt + totz + sizeof(z), c, nrows);
+			memcpy(tgt + totz, &z, sizeof(z));
+			totz += z + sizeof(z);
+			break;
+		}
+
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols[i];
@@ -96,53 +107,64 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 }
 
 size_t
-dcmp(cots_to_t *restrict t, cots_tag_t *restrict m, void *restrict cols[],
+dcmp(void *restrict cols[],
      size_t ncols, const char *layout, const uint8_t *src, size_t ssz)
 {
 	size_t si = 0U;
-	size_t nt;
+	size_t nt = 0U;
 	size_t z;
-
-	memcpy(&z, src + si, sizeof(z));
-	si += sizeof(z);
-	nt = dcmp_to(t, src + si, z);
-	si += z;
-	if (UNLIKELY(si >= ssz)) {
-		return 0U;
-	}
-
-	memcpy(&z, src + si, sizeof(z));
-	si += sizeof(z);
-	if (dcmp_tag(m, src + si, z) != nt) {
-		return 0U;
-	}
-	si += z;
-	if (UNLIKELY(si >= ssz)) {
-		return 0U;
-	}
 
 	/* columns now */
 	for (size_t i = 0U; i < ncols; i++) {
 		switch (layout[i]) {
+			size_t tmp;
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
 			uint32_t *c = cols[i];
 
 			memcpy(&z, src + si, sizeof(z));
 			si += sizeof(z);
-			if (dcmp_px(c, src + si, z) != nt) {
+			tmp = dcmp_px(c, src + si, z);
+			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
 				return 0U;
 			}
 			si += z;
 			break;
 		}
+
+		case COTS_LO_TIM: {
+			cots_to_t *c = cols[i];
+
+			memcpy(&z, src + si, sizeof(z));
+			si += sizeof(z);
+			tmp = dcmp_to(c, src + si, z);
+			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
+				return 0U;
+			}
+			si += z;
+			break;
+		}
+
+		case COTS_LO_TAG: {
+			cots_tag_t *c = cols[i];
+
+			memcpy(&z, src + si, sizeof(z));
+			si += sizeof(z);
+			tmp = dcmp_tag(c, src + si, z);
+			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
+				return 0U;
+			}
+			si += z;
+		}
+
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols[i];
 
 			memcpy(&z, src + si, sizeof(z));
 			si += sizeof(z);
-			if (dcmp_qx(c, src + si, z) != nt) {
+			tmp = dcmp_qx(c, src + si, z);
+			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
 				return 0U;
 			}
 			si += z;
@@ -150,6 +172,10 @@ dcmp(cots_to_t *restrict t, cots_tag_t *restrict m, void *restrict cols[],
 		}
 		default:
 			break;
+		}
+
+		if (UNLIKELY(si > ssz)) {
+			return 0U;
 		}
 	}
 	return nt;

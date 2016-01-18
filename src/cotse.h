@@ -107,19 +107,11 @@ typedef struct cots_ts_s {
 /**
  * User facing tick type.
  * This should be extended by the API user in accordance with the layout. */
-struct cots_tick_s {
-	cots_to_t toff;
-	cots_tag_t tag;
-	uint8_t value[];
-};
+struct cots_tick_s;
 
 /**
  * User facing SoA ticks type. */
-struct cots_tsoa_s {
-	cots_to_t *toffs;
-	cots_tag_t *tags;
-	void *more[];
-};
+struct cots_tsoa_s;
 
 
 /* public API */
