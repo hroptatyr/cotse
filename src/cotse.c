@@ -262,6 +262,7 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 	} cols;
 	uint8_t *buf;
 	size_t nrows;
+	size_t bi;
 	size_t bsz;
 	size_t z;
 
@@ -271,14 +272,15 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 	}
 
 	/* trial mmap */
-	bsz = Z(pb.zrow, pb.rowi);
+	bi = Z(sizeof(uint64_t), nrows);
+	bsz = bi + Z(pb.zrow, nrows);
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
 	}
 
 	/* columnarise times */
-	cols.proto.toffs = (void*)ALGN16(buf + sizeof(z));
+	cols.proto.toffs = (void*)ALGN16(buf + bi + sizeof(z));
 	with (const cots_to_t *t = (const cots_to_t*)pb.data) {
 		const size_t acols = pb.zrow / sizeof(*t);
 
@@ -287,10 +289,11 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 			cols.proto.toffs[j] = t[j * acols];
 		}
 		cols.till = cols.proto.toffs[nrows - 1U];
+		bi += Z(sizeof(cots_to_t), nrows);
 	}
 
 	/* columnarise */
-	for (size_t i = 0U, bi = Z(sizeof(cots_to_t), nrows); i < nflds; i++) {
+	for (size_t i = 0U; i < nflds; i++) {
 		/* next one is a bit of a Schlemiel, we could technically
 		 * iteratively compute A, much like _algn_zrow() does it,
 		 * but this way it saves us some explaining */
