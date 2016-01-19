@@ -77,13 +77,15 @@ static void
 dump(const struct samp_s s, size_t n)
 {
 	for (size_t i = 0U; i < n; i++) {
+		cots_to_t t = s.proto.toffs[i];
 		char p[32U];
 		char q[64U];
 
 		d32tostr(p, sizeof(p), s.b[i]);
 		d64tostr(q, sizeof(q), s.q[i]);
 
-		printf("%lu\t%lu\t%s\t%s\n", s.proto.toffs[i], s.m[i], p, q);
+		printf("%lu.%09lu\t%lu\t%s\t%s\n",
+		       t / 1000000000U, t % 1000000000U, s.m[i], p, q);
 	}
 	return;
 }
