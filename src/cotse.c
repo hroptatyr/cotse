@@ -983,7 +983,7 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 	size_t mi = 0U;
 
 	/* find offset of page and length */
-	with (const size_t pi = _s->si / NSAMP) {
+	with (const size_t pi = _s->si / _s->public.blockz) {
 		if (UNLIKELY(pi >= _s->nidx)) {
 			/* and reset the cursor */
 			_s->si = 0U;
@@ -1018,24 +1018,24 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 	/* decompress */
 	n = dcmp(tsoa, nflds, layo, m + mi, z);
 	/* set pointers to offset within page */
-	with (const size_t po = _s->si % NSAMP) {
+	with (const size_t po = _s->si % _s->public.blockz) {
 		/* subtract from N */
 		n -= po;
 
 		tsoa->toffs += po;
-		tsoa->tags += po;
 		for (size_t i = 0U; i < nflds; i++) {
 			switch (layo[i]) {
 			case COTS_LO_PRC:
 			case COTS_LO_FLT:
-				tsoa->more[i] = (uint32_t*)tsoa->more[i] + po;
+				tsoa->cols[i] = (uint32_t*)tsoa->cols[i] + po;
 				break;
+			case COTS_LO_TAG:
 			case COTS_LO_QTY:
 			case COTS_LO_DBL:
-				tsoa->more[i] = (uint64_t*)tsoa->more[i] + po;
+				tsoa->cols[i] = (uint64_t*)tsoa->cols[i] + po;
 				break;
 			case COTS_LO_BYT:
-				tsoa->more[i] = (uint8_t*)tsoa->more[i] + po;
+				tsoa->cols[i] = (uint8_t*)tsoa->cols[i] + po;
 				break;
 			default:
 				break;
