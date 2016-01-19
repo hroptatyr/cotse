@@ -107,11 +107,17 @@ typedef struct cots_ts_s {
 /**
  * User facing tick type.
  * This should be extended by the API user in accordance with the layout. */
-struct cots_tick_s;
+struct cots_tick_s {
+	cots_to_t toff;
+	uint8_t row[];
+};
 
 /**
  * User facing SoA ticks type. */
-struct cots_tsoa_s;
+struct cots_tsoa_s {
+	cots_to_t *toffs;
+	void *cols[];
+};
 
 
 /* public API */
@@ -159,7 +165,7 @@ extern int cots_put_fields(cots_ts_t, const char **fields);
  * Use TO parameter to record time offset.
  * Use TAG argument to tag this sample.
  * Optional arguments should coincide with the layout of the timeseries. */
-extern int cots_write_va(cots_ts_t, ...);
+extern int cots_write_va(cots_ts_t, cots_to_t, ...);
 
 /**
  * Write data tick to series.

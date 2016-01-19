@@ -54,17 +54,22 @@
 
 size_t
 comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
-     void *const cols[])
+     const struct cots_tsoa_s *cols)
 {
 	size_t totz = 0U;
 	size_t z;
+
+	/* toffs first */
+	z = comp_to(tgt + totz + sizeof(z), cols->toffs, nrows);
+	memcpy(tgt + totz, &z, sizeof(z));
+	totz += z + sizeof(z);
 
 	/* columns now */
 	for (size_t i = 0U; i < ncols; i++) {
 		switch (layout[i]) {
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
-			uint32_t *c = cols[i];
+			uint32_t *c = cols->cols[i];
 
 			z = comp_px(tgt + totz + sizeof(z), c, nrows);
 			memcpy(tgt + totz, &z, sizeof(z));
@@ -73,7 +78,7 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 		}
 
 		case COTS_LO_TIM: {
-			cots_to_t *c = cols[i];
+			cots_to_t *c = cols->cols[i];
 
 			z = comp_to(tgt + totz + sizeof(z), c, nrows);
 			memcpy(tgt + totz, &z, sizeof(z));
@@ -82,7 +87,7 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 		}
 
 		case COTS_LO_TAG: {
-			cots_tag_t *c = cols[i];
+			cots_tag_t *c = cols->cols[i];
 
 			z = comp_tag(tgt + totz + sizeof(z), c, nrows);
 			memcpy(tgt + totz, &z, sizeof(z));
@@ -92,7 +97,7 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
-			uint64_t *c = cols[i];
+			uint64_t *c = cols->cols[i];
 
 			z = comp_qx(tgt + totz + sizeof(z), c, nrows);
 			memcpy(tgt + totz, &z, sizeof(z));
@@ -107,74 +112,72 @@ comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
 }
 
 size_t
-dcmp(void *restrict cols[],
+dcmp(struct cots_tsoa_s *restrict cols,
      size_t ncols, const char *layout, const uint8_t *src, size_t ssz)
 {
 	size_t si = 0U;
-	size_t nt = 0U;
+	size_t nt;
 	size_t z;
 
+	/* times first */
+	memcpy(&z, src + si, sizeof(z));
+	si += sizeof(z);
+	nt = dcmp_to(cols->toffs, src + si, z);
+	si += z;
+
 	/* columns now */
-	for (size_t i = 0U; i < ncols; i++) {
+	for (size_t i = 0U, ntdcmp; i < ncols; i++) {
+		if (UNLIKELY(si >= ssz)) {
+			return 0U;
+		}
+
 		switch (layout[i]) {
-			size_t tmp;
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
-			uint32_t *c = cols[i];
+			uint32_t *c = cols->cols[i];
 
 			memcpy(&z, src + si, sizeof(z));
 			si += sizeof(z);
-			tmp = dcmp_px(c, src + si, z);
-			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
-				return 0U;
-			}
+			ntdcmp = dcmp_px(c, src + si, z);
 			si += z;
 			break;
 		}
 
 		case COTS_LO_TIM: {
-			cots_to_t *c = cols[i];
+			cots_to_t *c = cols->cols[i];
 
 			memcpy(&z, src + si, sizeof(z));
 			si += sizeof(z);
-			tmp = dcmp_to(c, src + si, z);
-			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
-				return 0U;
-			}
+			ntdcmp = dcmp_to(c, src + si, z);
 			si += z;
 			break;
 		}
 
 		case COTS_LO_TAG: {
-			cots_tag_t *c = cols[i];
+			cots_tag_t *c = cols->cols[i];
 
 			memcpy(&z, src + si, sizeof(z));
 			si += sizeof(z);
-			tmp = dcmp_tag(c, src + si, z);
-			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
-				return 0U;
-			}
+			ntdcmp = dcmp_tag(c, src + si, z);
 			si += z;
+			break;
 		}
 
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
-			uint64_t *c = cols[i];
+			uint64_t *c = cols->cols[i];
 
 			memcpy(&z, src + si, sizeof(z));
 			si += sizeof(z);
-			tmp = dcmp_qx(c, src + si, z);
-			if (UNLIKELY((nt = nt ?: tmp) != tmp)) {
-				return 0U;
-			}
+			ntdcmp = dcmp_qx(c, src + si, z);
 			si += z;
 			break;
 		}
 		default:
 			break;
 		}
-
-		if (UNLIKELY(si > ssz)) {
+		/* check if all columns have the same number o ticks */
+		if (UNLIKELY(ntdcmp != nt)) {
 			return 0U;
 		}
 	}

@@ -57,7 +57,7 @@
 #define strtoqx		strtod64
 
 struct samp_s {
-	cots_to_t t;
+	struct cots_tick_s proto;
 	cots_tag_t m;
 	cots_px_t b;
 	cots_qx_t q;
@@ -91,22 +91,22 @@ push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 	cots_tag_t m;
 
 	if (line[20U] != '\t') {
-		return (struct samp_s){0U, 0U};
+		return (struct samp_s){{0U}, 0U};
 	} else if (!(s = strtoul(line, &on, 10))) {
-		return (struct samp_s){0U, 0U};
+		return (struct samp_s){{0U}, 0U};
 	} else if (*on++ != '.') {
-		return (struct samp_s){0U, 0U};
+		return (struct samp_s){{0U}, 0U};
 	} else if ((x = strtoul(on, &on, 10), *on != '\t')) {
-		return (struct samp_s){0U, 0U};
+		return (struct samp_s){{0U}, 0U};
 	}
 	s = (s * NSECS + x);
 
 	with (const char *ecn = ++on) {
 		if (UNLIKELY((on = strchr(ecn, '\t')) == NULL)) {
-			return (struct samp_s){0U, 0U};
+			return (struct samp_s){{0U}, 0U};
 		} else if (UNLIKELY(!(m = cots_tag(ts, ecn, on - ecn)))) {
 			/* fuck */
-			return (struct samp_s){0U, 0U};
+			return (struct samp_s){{0U}, 0U};
 		}
 	}
 
@@ -121,7 +121,7 @@ push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 	} else {
 		q = COTS_QX_MISS.d64;
 	}
-	return (struct samp_s){s, m, b, q};
+	return (struct samp_s){{s}, m, b, q};
 }
 
 
@@ -133,10 +133,10 @@ main(int argc, char *argv[])
 	char *line = NULL;
 	size_t llen = 0U;
 
-	if ((db = make_cots_ts("tmpq", 0U)) == NULL) {
+	if ((db = make_cots_ts("mpq", 0U)) == NULL) {
 		return 1;
 	}
-	cots_put_fields(db, (const char*[]){"STAMP", "SOURCE", "BID", "SIZE"});
+	cots_put_fields(db, (const char*[]){"SOURCE", "BID", "SIZE"});
 
 	with (const char *fn = argv[1U]) {
 		size_t i = 0U;
@@ -153,7 +153,7 @@ main(int argc, char *argv[])
 			struct samp_s x = push(db, line, nrd);
 
 			if (x.m) {
-				cots_write_tick(db, &x);
+				cots_write_tick(db, &x.proto);
 			}
 			if (++i >= 1000000) {
 				break;

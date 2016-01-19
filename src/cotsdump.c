@@ -50,7 +50,7 @@
 #include "nifty.h"
 
 struct samp_s {
-	cots_to_t *t;
+	struct cots_tsoa_s proto;
 	cots_tag_t *m;
 	cots_px_t *b;
 	cots_qx_t *q;
@@ -83,7 +83,7 @@ dump(const struct samp_s s, size_t n)
 		d32tostr(p, sizeof(p), s.b[i]);
 		d64tostr(q, sizeof(q), s.q[i]);
 
-		printf("%lu\t%lu\t%s\t%s\n", s.t[i], s.m[i], p, q);
+		printf("%lu\t%lu\t%s\t%s\n", s.proto.toffs[i], s.m[i], p, q);
 	}
 	return;
 }
@@ -105,7 +105,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-		while ((n = cots_read_ticks(&s, hdl)) > 0) {
+		while ((n = cots_read_ticks(&s.proto, hdl)) > 0) {
 			fprintf(stderr, "got %zd ticks\n", n);
 			dump(s, n);
 			break;
