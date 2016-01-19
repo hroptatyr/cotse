@@ -81,6 +81,8 @@ typedef struct cots_ts_s {
 	const cots_tm_t reftm;
 	/** number of fields */
 	const size_t nfields;
+	/** block size (number of ticks per page) */
+	const size_t blockz;
 	/** layout (for reference), nul-terminated
 	 * Each character represents one field type,
 	 * see COTS_LO_* definitions for details.
@@ -95,6 +97,8 @@ typedef struct cots_ts_s {
 /* layout values */
 #define COTS_LO_END	'\0'
 #define COTS_LO_BYT	'b'
+#define COTS_LO_TIM	't'
+#define COTS_LO_TAG	'm'
 #define COTS_LO_PRC	'p'
 #define COTS_LO_QTY	'q'
 #define COTS_LO_FLT	'f'
@@ -105,24 +109,24 @@ typedef struct cots_ts_s {
  * This should be extended by the API user in accordance with the layout. */
 struct cots_tick_s {
 	cots_to_t toff;
-	cots_tag_t tag;
-	uint8_t value[];
+	uint8_t row[];
 };
 
 /**
  * User facing SoA ticks type. */
 struct cots_tsoa_s {
 	cots_to_t *toffs;
-	cots_tag_t *tags;
-	void *more[];
+	void *cols[];
 };
 
 
 /* public API */
 /**
  * Create a time series object.
- * For LAYOUT parameter see description of LAYOUT slot for cots_ts_t. */
-extern cots_ts_t make_cots_ts(const char *layout);
+ * For LAYOUT parameter see description of LAYOUT slot for cots_ts_t.
+ * For BLOCKZ parameter see description of BLOCKZ slot for cots_ts_t,
+ * when BLOCKZ is 0, the default block size will be used. */
+extern cots_ts_t make_cots_ts(const char *layout, size_t blockz);
 
 /**
  * Free a time series object. */
@@ -161,7 +165,7 @@ extern int cots_put_fields(cots_ts_t, const char **fields);
  * Use TO parameter to record time offset.
  * Use TAG argument to tag this sample.
  * Optional arguments should coincide with the layout of the timeseries. */
-extern int cots_write_va(cots_ts_t, cots_to_t, cots_tag_t, ...);
+extern int cots_write_va(cots_ts_t, cots_to_t, ...);
 
 /**
  * Write data tick to series.

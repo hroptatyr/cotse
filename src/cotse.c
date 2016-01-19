@@ -59,7 +59,6 @@
 # define MAP_ANON	MAP_ANONYMOUS
 #endif	/* !MAP_ANON */
 
-#define NSAMP		(8192U)
 #define NTIDX		(512U)
 
 #define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
@@ -72,6 +71,8 @@ struct fhdr_s {
 	uint8_t magic[4U];
 	uint8_t version[2U];
 	uint16_t endian;
+	/* tba
+	 * - lowest 4bits of flags is the log2 of the block size minus 9 */
 	uint64_t flags;
 	/* offset to index pages */
 	uint64_t ioff;
@@ -95,6 +96,15 @@ struct blob_s {
 	cots_to_t till;
 };
 
+struct pbuf_s {
+	/* size of one row with alignment */
+	size_t zrow;
+	/* tick index */
+	size_t rowi;
+	/* data */
+	uint8_t *data;
+};
+
 struct _ts_s {
 	struct cots_ts_s public;
 
@@ -107,17 +117,8 @@ struct _ts_s {
 	/* obarray for tags */
 	cots_ob_t obarray;
 
-	/* C aligned layout size, taking alignment into consideration */
-	size_t zcols;
-
-	/* scratch array, row wise */
-	uint64_t *row_scratch;
-	/* number of rows in the scratch buffer */
-	size_t nrows;
-
-	/* provision for NSAMP timestamps and tags */
-	cots_to_t t[NSAMP];
-	cots_tag_t m[NSAMP];
+	/* row-oriented page buffer */
+	struct pbuf_s pb;
 
 	/* currently attached file and its opening flags */
 	int fd;
@@ -205,14 +206,14 @@ _ilen(const struct _ts_s *_s)
 }
 
 static size_t
-_algn_zcols(const char *layout, size_t nflds)
+_algn_zrow(const char *layout, size_t nflds)
 {
 /* calculate sizeof(`layout') with alignments and stuff
  * to be used as partial summator align size of the first NFLDS fields
  * to the alignment requirements of the NFLDS+1st field */
 	size_t z = 0U;
 
-	for (size_t i = 0U, inc = 0U; i <= nflds; i++) {
+	for (size_t i = 0U, inc = sizeof(cots_to_t); i <= nflds; i++) {
 		/* add increment from last iteration */
 		z += inc;
 
@@ -226,6 +227,8 @@ _algn_zcols(const char *layout, size_t nflds)
 			z = ALGN4(z);
 			inc = 4U;
 			break;
+		case COTS_LO_TIM:
+		case COTS_LO_TAG:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
 			/* round Z up to next 8 multiple */
@@ -240,63 +243,88 @@ _algn_zcols(const char *layout, size_t nflds)
 	return z;
 }
 
-static struct blob_s
-_make_blob(const char *flds, size_t nflds, size_t zcols, size_t nrows,
-	   const cots_to_t *t, const cots_tag_t *m, const void *rows)
+static struct pbuf_s
+_make_pbuf(size_t zrow, size_t blkz)
 {
-	void *cols[nflds];
+	void *data = calloc(blkz, zrow);
+	return (struct pbuf_s){zrow, 0U, data};
+}
+
+static struct blob_s
+_make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
+{
+#define Z(zrow, nrows)	(3U * nrows * zrow / 2U)
+	struct {
+		struct cots_tsoa_s proto;
+		void *cols[nflds];
+		cots_to_t from;
+		cots_to_t till;
+	} cols;
 	uint8_t *buf;
+	size_t nrows;
+	size_t bi;
 	size_t bsz;
 	size_t z;
 
-	if (UNLIKELY(!nrows)) {
+	if (UNLIKELY(!(nrows = pb.rowi))) {
 		/* trivial */
 		return (struct blob_s){0U, NULL};
 	}
 
 	/* trial mmap */
-	bsz = 3U * (sizeof(*t) + sizeof(*m) + zcols) * nrows / 2U;
+	bi = Z(sizeof(uint64_t), nrows);
+	bsz = bi + Z(pb.zrow, nrows);
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
 	}
 
+	/* columnarise times */
+	cols.proto.toffs = (void*)ALGN16(buf + bi + sizeof(z));
+	with (const cots_to_t *t = (const cots_to_t*)pb.data) {
+		const size_t acols = pb.zrow / sizeof(*t);
+
+		cols.from = t[0U];
+		for (size_t j = 0U; j < nrows; j++) {
+			cols.proto.toffs[j] = t[j * acols];
+		}
+		cols.till = cols.proto.toffs[nrows - 1U];
+		bi += Z(sizeof(cots_to_t), nrows);
+	}
+
 	/* columnarise */
-	for (size_t i = 0U,
-		     /* column index with some breathing space in bytes */
-		     bi = 3U * (sizeof(*t) + sizeof(*m)) * nrows / 2U;
-	     i < nflds; i++) {
+	for (size_t i = 0U; i < nflds; i++) {
 		/* next one is a bit of a Schlemiel, we could technically
-		 * iteratively compute A, much like _algn_zcols() does it,
+		 * iteratively compute A, much like _algn_zrow() does it,
 		 * but this way it saves us some explaining */
-		const size_t a = _algn_zcols(flds, i);
-		cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
+		const size_t a = _algn_zrow(flds, i);
+		cols.cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
 
 		switch (flds[i]) {
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
-			uint32_t *c = cols[i];
-			const uint32_t *r =
-				(const uint32_t*)rows + a / sizeof(*r);
-			const size_t acols = zcols / sizeof(*r);
+			uint32_t *c = cols.cols[i];
+			const uint32_t *r = (const uint32_t*)(pb.data + a);
+			const size_t acols = pb.zrow / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
 				c[j] = r[j * acols];
 			}
-			bi += 3U * nrows * sizeof(*c) / 2U;
+			bi += Z(sizeof(*c), nrows);
 			break;
 		}
+		case COTS_LO_TIM:
+		case COTS_LO_TAG:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
-			uint64_t *c = cols[i];
-			const uint64_t *r =
-				(const uint64_t*)rows + a / sizeof(*r);
-			const size_t acols = zcols / sizeof(*r);
+			uint64_t *c = cols.cols[i];
+			const uint64_t *r = (const uint64_t*)(pb.data + a);
+			const size_t acols = pb.zrow / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
 				c[j] = r[j * acols];
 			}
-			bi += 3U * nrows * sizeof(*c) / 2U;
+			bi += Z(sizeof(*c), nrows);
 			break;
 		}
 		default:
@@ -305,7 +333,7 @@ _make_blob(const char *flds, size_t nflds, size_t zcols, size_t nrows,
 	}
 
 	/* call the compactor */
-	z = comp(buf + sizeof(z), nflds, nrows, flds, t, m, cols);
+	z = comp(buf + sizeof(z), nflds, nrows, flds, &cols.proto);
 	memcpy(buf, &z, sizeof(z));
 	z += sizeof(z);
 
@@ -317,11 +345,12 @@ _make_blob(const char *flds, size_t nflds, size_t zcols, size_t nrows,
 		}
 		buf = blo;
 	}
-	return (struct blob_s){z, buf, t[0U], t[nrows - 1U]};
+	return (struct blob_s){z, buf, cols.from, cols.till};
 
 mun_out:
 	munmap(buf, bsz);
 	return (struct blob_s){0U, NULL};
+#undef Z
 }
 
 static int
@@ -410,6 +439,7 @@ static int
 _flush_hdr(const struct _ts_s *_s)
 {
 	const size_t nflds = _s->public.nfields;
+	const size_t blkz = _s->public.blockz;
 
 	if (UNLIKELY(_s->fd < 0)) {
 		/* no need */
@@ -417,6 +447,10 @@ _flush_hdr(const struct _ts_s *_s)
 	} else if (UNLIKELY(_s->mdr == NULL)) {
 		/* great */
 		return 0;
+	}
+	/* keep track of block size */
+	with (unsigned int lgbz = __builtin_ctz(blkz) - 9U) {
+		_s->mdr->flags = htobe64(lgbz & 0xfU);
 	}
 	/* otherwise */
 	with (off_t ioff = _ioff(_s)) {
@@ -433,21 +467,20 @@ _flush(struct _ts_s *_s)
 /* compact WAL and write contents to backing file */
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
-	const uint64_t *rows = _s->row_scratch;
 	struct blob_s b;
 
-	if (UNLIKELY(!_s->nrows)) {
+	if (UNLIKELY(!_s->pb.rowi)) {
 		return 0;
 	}
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->zcols, _s->nrows, _s->t, _s->m, rows);
+	b = _make_blob(layo, nflds, _s->pb);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
 		return -1;
 	}
 
-	size_t uncomp = _s->nrows * 2U * sizeof(uint64_t) + 12U * _s->nrows;
+	size_t uncomp = _s->pb.rowi * 2U * sizeof(uint64_t) + _s->pb.zrow * _s->pb.rowi;
 	fprintf(stderr, "comp %zu  (%0.2f%%)\n", b.z, 100. * (double)b.z / (double)uncomp);
 
 	/* manifest blob in file */
@@ -459,7 +492,7 @@ _flush(struct _ts_s *_s)
 	/* update header */
 	_flush_hdr(_s);
 
-	_s->nrows = 0U;
+	_s->pb.rowi = 0U;
 	return -1;
 }
 
@@ -505,32 +538,38 @@ _rd_idx(struct _ts_s *_s)
 
 /* public API */
 cots_ts_t
-make_cots_ts(const char *layout)
+make_cots_ts(const char *layout, size_t blockz)
 {
 	struct _ts_s *res = calloc(1, sizeof(*res));
 	size_t laylen;
-	size_t zcols;
+	size_t zrow;
 
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
 		laylen = strlen(layout);
-		zcols = _algn_zcols(layout, laylen);
+		zrow = _algn_zrow(layout, laylen);
 	} else {
 		res->public.layout = nul_layout;
 		laylen = 0U;
-		zcols = 0U;
+		zrow = 0U;
 	}
 
-	/* store layout length as nfields */
+	/* use default block size? */
+	blockz = blockz ?: 8192U;
+
+	/* store layout length as nfields and blocksize as blockz */
 	{
 		void *nfp = deconst(&res->public.nfields);
-		memcpy(nfp, &laylen, sizeof(laylen));
+		void *bzp = deconst(&res->public.blockz);
 
-		res->row_scratch = calloc(laylen * NSAMP, sizeof(uint64_t));
+		memcpy(nfp, &laylen, sizeof(laylen));
+		memcpy(bzp, &blockz, sizeof(blockz));
 	}
+
 	res->obarray = make_cots_ob();
 
-	res->zcols = zcols;
+	/* make a page buffer (WAL) */
+	res->pb = _make_pbuf(zrow, blockz);
 
 	/* use a backing file? */
 	res->fd = -1;
@@ -551,8 +590,8 @@ free_cots_ts(cots_ts_t ts)
 		free(deconst(_ts->public.fields));
 		free(_ts->fields);
 	}
-	if (LIKELY(_ts->row_scratch != NULL)) {
-		free(_ts->row_scratch);
+	if (LIKELY(_ts->pb.data != NULL)) {
+		free(_ts->pb.data);
 	}
 	if (LIKELY(_ts->obarray != NULL)) {
 		free_cots_ob(_ts->obarray);
@@ -568,6 +607,8 @@ cots_open_ts(const char *file, int flags)
 	struct fhdr_s hdr;
 	struct stat st;
 	size_t nflds;
+	size_t blkz;
+	size_t zrow;
 	int fd;
 
 	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
@@ -593,6 +634,10 @@ cots_open_ts(const char *file, int flags)
 	if (UNLIKELY((res = calloc(1, sizeof(*res))) == NULL)) {
 		return NULL;
 	}
+	/* read block size */
+	with (uint64_t fl = be64toh(hdr.flags)) {
+		blkz = 1UL << ((fl & 0xfU) + 9U);
+	}
 	/* make backing file known */
 	res->fd = fd;
 	res->public.filename = strdup(file);
@@ -614,15 +659,20 @@ cots_open_ts(const char *file, int flags)
 		/* determine nflds */
 		nflds = eo - layo;
 		/* determine aligned size */
-		res->zcols = _algn_zcols(layo, nflds);
+		zrow = _algn_zrow(layo, nflds);
 	}
 
 	/* make number of fields known publicly */
 	with (void *nfp = deconst(&res->public.nfields)) {
 		memcpy(nfp, &nflds, sizeof(nflds));
 	}
+	/* make blocksize known publicly */
+	with (void *bzp = deconst(&res->public.blockz)) {
+		memcpy(bzp, &blkz, sizeof(blkz));
+	}
+
 	/* get some scratch space for this one */
-	res->row_scratch = calloc(nflds * NSAMP, sizeof(uint64_t));
+	res->pb = _make_pbuf(zrow, blkz);
 	/* map the header for reference */
 	with (off_t hz = sizeof(*res->mdr) + nflds + 1U) {
 		res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
@@ -638,7 +688,7 @@ cots_open_ts(const char *file, int flags)
 
 fre_out:
 	free(deconst(res->public.filename));
-	free(res->row_scratch);
+	free(res->pb.data);
 	free(res);
 clo_out:
 	save_errno {
@@ -758,7 +808,7 @@ cots_detach(cots_ts_t s)
 	struct _ts_s *_s = (void*)s;
 
 	if (_s->fd >= 0) {
-		if (UNLIKELY(_s->nrows)) {
+		if (UNLIKELY(_s->pb.rowi)) {
 			_flush(_s);
 		}
 		/* munmap blobs */
@@ -853,32 +903,45 @@ cots_put_fields(cots_ts_t s, const char **fields)
 
 
 int
-cots_write_va(cots_ts_t s, cots_to_t t, cots_tag_t m, ...)
+cots_write_va(cots_ts_t s, cots_to_t t, ...)
 {
 	struct _ts_s *_s = (void*)s;
+	const char *flds = _s->public.layout;
+	uint8_t *rp = _s->pb.data + _s->pb.rowi * _s->pb.zrow;
 	va_list vap;
 
-	_s->t[_s->nrows] = t;
-	_s->m[_s->nrows] = m;
-	va_start(vap, m);
-	for (size_t i = 0U, n = _s->public.nfields,
-		     row = _s->nrows * n; i < n; i++) {
+	with (cots_to_t *tp = (void*)rp) {
+		*tp = t;
+	}
+	va_start(vap, t);
+	for (size_t i = 0U, n = _s->public.nfields; i < n; i++) {
+		/* next one is a bit of a Schlemiel, we could technically
+		 * iteratively compute A, much like _algn_zrow() does it,
+		 * but this way it saves us some explaining */
+		const size_t a = _algn_zrow(flds, i);
+
 		switch (_s->public.layout[i]) {
 		case COTS_LO_PRC:
-		case COTS_LO_FLT:
-			_s->row_scratch[row + i] = va_arg(vap, uint32_t);
+		case COTS_LO_FLT: {
+			uint32_t *cp = (uint32_t*)(rp + a);
+			*cp = va_arg(vap, uint32_t);
 			break;
+		}
+		case COTS_LO_TIM:
+		case COTS_LO_TAG:
 		case COTS_LO_QTY:
-		case COTS_LO_DBL:
-			_s->row_scratch[row + i] = va_arg(vap, uint64_t);
+		case COTS_LO_DBL: {
+			uint64_t *cp = (uint64_t*)(rp + a);
+			*cp = va_arg(vap, uint64_t);
 			break;
+		}
 		default:
 			break;
 		}
 	}
 	va_end(vap);
 
-	if (UNLIKELY(++_s->nrows == NSAMP)) {
+	if (UNLIKELY(++_s->pb.rowi == _s->public.blockz)) {
 		/* auto-eviction */
 		_flush(_s);
 	}
@@ -889,14 +952,11 @@ int
 cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 {
 	struct _ts_s *_s = (void*)s;
-	const size_t nflds = _s->public.nfields;
+	const size_t blkz = _s->public.blockz;
 
-	_s->t[_s->nrows] = data->toff;
-	_s->m[_s->nrows] = data->tag;
+	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
 
-	memcpy(&_s->row_scratch[_s->nrows * nflds], data->value, _s->zcols);
-
-	if (UNLIKELY(++_s->nrows == NSAMP)) {
+	if (UNLIKELY(++_s->pb.rowi == blkz)) {
 		/* auto-eviction */
 		_flush(_s);
 	}
@@ -908,6 +968,7 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 {
 	struct _ts_s *_s = (void*)s;
 	const size_t nflds = _s->public.nfields;
+	const size_t blkz = _s->public.blockz;
 	const char *layo = _s->public.layout;
 	size_t n = 0U;
 	size_t z;
@@ -940,14 +1001,13 @@ cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
 	}
 
 	/* setup result soa */
-	tsoa->toffs = _s->t;
-	tsoa->tags = _s->m;
+	tsoa->toffs = (cots_to_t*)_s->pb.data;
 	for (size_t i = 0U; i < nflds; i++) {
-		tsoa->more[i] = _s->row_scratch + i * NSAMP;
+		tsoa->cols[i] = tsoa->toffs + (i + 1U) * blkz;
 	}
 
 	/* decompress */
-	n = dcmp(_s->t, _s->m, tsoa->more, nflds, layo, m + mi, z);
+	n = dcmp(tsoa, nflds, layo, m + mi, z);
 
 mun_out:
 	munmap_any(m, poff, z);

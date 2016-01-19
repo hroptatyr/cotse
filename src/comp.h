@@ -41,11 +41,11 @@
 
 
 extern size_t
-comp(uint8_t *tgt, size_t ncols, size_t nrows, const char *layout,
-     const cots_to_t *to, const cots_tag_t *tag, void *const cols[]);
+comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
+     const struct cots_tsoa_s *cols);
 
 extern size_t
-dcmp(cots_to_t *restrict t, cots_tag_t *restrict m, void *restrict cols[],
-     size_t ncols, const char *layout, const uint8_t *src, size_t ssz);
+dcmp(struct cots_tsoa_s *restrict cols,
+     size_t ncols, const char *layout, const uint8_t *restrict src, size_t ssz);
 
 #endif	/* INCLUDED_comp_h_ */
