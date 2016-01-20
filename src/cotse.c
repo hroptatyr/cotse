@@ -358,6 +358,13 @@ mun_out:
 #undef Z
 }
 
+static void
+_free_blob(struct blob_s b)
+{
+	munmap_any(b.data, 0U, b.z);
+	return;
+}
+
 static int
 _add_blob(struct _ts_s *_s, struct blob_s b)
 {
