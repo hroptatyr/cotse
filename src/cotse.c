@@ -105,8 +105,27 @@ struct pbuf_s {
 	uint8_t *data;
 };
 
+struct _ss_s {
+	struct cots_ss_s public;
+
+	/* mmapped file header */
+	struct fhdr_s *mdr;
+
+	/* compacted version of fields */
+	char *fields;
+
+	/* row-oriented page buffer */
+	struct pbuf_s pb;
+
+	/* currently attached file and its opening flags */
+	int fd;
+	int fl;
+	/* current offset for next blob */
+	off_t fo;
+};
+
 struct _ts_s {
-	struct cots_ts_s public;
+	struct cots_ss_s public;
 
 	/* mmapped file header */
 	struct fhdr_s *mdr;
@@ -509,6 +528,49 @@ _flush(struct _ts_s *_s)
 }
 
 static int
+_flush_ss(struct _ss_s *_s)
+{
+/* compact WAL and write contents to backing file */
+	const size_t nflds = _s->public.nfields;
+	const char *const layo = _s->public.layout;
+	struct blob_s b;
+	int rc = 0;
+
+	/* get ourselves a blob first */
+	b = _make_blob(layo, nflds, _s->pb);
+
+	if (UNLIKELY(b.data == NULL)) {
+		/* blimey */
+		return -1;
+	}
+
+	size_t uncomp = _s->pb.rowi * 2U * sizeof(uint64_t) + _s->pb.zrow * _s->pb.rowi;
+	fprintf(stderr, "comp %zu  (%0.2f%%)\n", b.z, 100. * (double)b.z / (double)uncomp);
+
+	/* manifest blob in file */
+	if (_s->fd >= 0) {
+		/* backing file present */
+
+		/* simply write stuff */
+		for (ssize_t nwr, rem = b.z; rem > 0; rem -= nwr) {
+			nwr = write(_s->fd, b.data + (b.z - rem), rem);
+
+			if (UNLIKELY(nwr < 0)) {
+				/* truncate back to old size */
+				(void)ftruncate(_s->fd, _s->fo);
+				rc = -1;
+				goto fre_out;
+			}
+		}
+		/* otherwise advance file offset and celebrate */
+		_s->fo += b.z;
+	}
+fre_out:
+	_free_blob(b);
+	return rc;
+}
+
+static int
 _rd_idx(struct _ts_s *_s)
 {
 	off_t ioff;
@@ -545,6 +607,89 @@ _rd_idx(struct _ts_s *_s)
 	/* lest we forget about nidx */
 	_s->nidx = nidx;
 	return 0;
+}
+
+
+/* public series storage API */
+cots_ss_t
+make_cots_ss(const char *layout, size_t blockz)
+{
+	struct _ss_s *res = calloc(1, sizeof(*res));
+	size_t laylen;
+	size_t zrow;
+
+	if (LIKELY(layout != NULL)) {
+		res->public.layout = strdup(layout);
+		laylen = strlen(layout);
+		zrow = _algn_zrow(layout, laylen);
+	} else {
+		res->public.layout = nul_layout;
+		laylen = 0U;
+		zrow = 0U;
+	}
+
+	/* use default block size? */
+	blockz = blockz ?: 8192U;
+
+	/* store layout length as nfields and blocksize as blockz */
+	{
+		void *nfp = deconst(&res->public.nfields);
+		void *bzp = deconst(&res->public.blockz);
+
+		memcpy(nfp, &laylen, sizeof(laylen));
+		memcpy(bzp, &blockz, sizeof(blockz));
+	}
+
+	/* make a page buffer (WAL) */
+	res->pb = _make_pbuf(zrow, blockz);
+
+	/* use a backing file? */
+	res->fd = -1;
+
+	return (cots_ss_t)res;
+}
+
+void
+free_cots_ss(cots_ss_t ss)
+{
+	struct _ss_s *_ss = (void*)ss;
+
+	if (LIKELY(_ss->public.layout != nul_layout)) {
+		free(deconst(_ss->public.layout));
+	}
+	if (_ss->public.fields != NULL) {
+		free(deconst(_ss->public.fields));
+		free(_ss->fields);
+	}
+	if (LIKELY(_ss->pb.data != NULL)) {
+		free(_ss->pb.data);
+	}
+	free(_ss);
+	return;
+}
+
+int
+cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
+{
+	struct _ss_s *_s = (void*)s;
+
+	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
+	return 0;
+}
+
+int
+cots_keep_last(cots_ss_t s)
+{
+	struct _ss_s *_s = (void*)s;
+	const size_t blkz = _s->public.blockz;
+	int rc = 0;
+
+	if (UNLIKELY(++_s->pb.rowi == blkz)) {
+		/* auto-eviction */
+		rc = _flush_ss(_s);
+		_s->pb.rowi = 0U;
+	}
+	return rc;
 }
 
 

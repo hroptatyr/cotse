@@ -78,7 +78,7 @@ typedef _Decimal64 cots_qx_t;
 
 /**
  * Time series. */
-typedef struct cots_ts_s {
+typedef struct cots_ss_s {
 	/** reference time */
 	const cots_tm_t reftm;
 	/** number of fields */
@@ -186,5 +186,16 @@ extern int cots_write_ticks(cots_ts_t, const struct cots_tick_s*, size_t n);
 /**
  * Read data tick from series, output to TGT. */
 extern ssize_t cots_read_ticks(struct cots_tsoa_s *restrict, cots_ts_t);
+
+
+/* lower level storage api */
+typedef struct cots_ts_s *cots_ss_t;
+
+extern cots_ss_t make_cots_ss(const char *layout, size_t blockz);
+extern void free_cots_ss(cots_ss_t);
+/* bang DATA to current row buffer */
+extern int cots_bang_tick(cots_ss_t, const struct cots_tick_s*);
+/* advance row buffer */
+extern int cots_keep_last(cots_ss_t);
 
 #endif	/* INCLUDED_cotse_h_ */
