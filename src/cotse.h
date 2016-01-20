@@ -105,6 +105,10 @@ typedef struct cots_ts_s {
 #define COTS_LO_QTY	'q'
 #define COTS_LO_FLT	'f'
 #define COTS_LO_DBL	'd'
+/* 64bit sizes, non-negative */
+#define COTS_LO_SIZ	'z'
+/* 64bit accumulated sizes (counts), monotonical */
+#define COTS_LO_CNT	'c'
 
 /**
  * User facing tick type.
