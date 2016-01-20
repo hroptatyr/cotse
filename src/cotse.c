@@ -115,6 +115,8 @@ struct _ss_s {
 	int fl;
 	/* current offset for next blob */
 	off_t fo;
+	/* current offset for reading */
+	off_t ro;
 };
 
 static const char nul_layout[] = "";
@@ -177,6 +179,12 @@ msync_any(void *map, off_t off, size_t len, int flags)
 }
 
 
+static inline __attribute__((pure, const)) size_t
+min_z(size_t x, size_t y)
+{
+	return x < y ? x : y;
+}
+
 static size_t
 _algn_zrow(const char *layout, size_t nflds)
 {
@@ -510,7 +518,6 @@ cots_open_ss(const char *file, int flags)
 		blkz = 1UL << ((fl & 0xfU) + 9U);
 	}
 	/* make backing file known */
-	res->fd = fd;
 	res->public.filename = strdup(file);
 	{
 		size_t zlay = 8U, olay = 0U;
@@ -543,12 +550,20 @@ cots_open_ss(const char *file, int flags)
 	}
 
 	/* get some scratch space for this one */
-	res->pb = _make_pbuf(zrow, blkz);
+	if (flags) {
+		res->pb = _make_pbuf(zrow, blkz);
+	}
 	/* map the header for reference */
 	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
 	if (UNLIKELY(res->mdr == NULL)) {
 		goto fre_out;
 	}
+
+	/* collect details about this backing file */
+	res->fd = fd;
+	res->fl = flags;
+	res->fo = be64toh(res->mdr->ioff) ?: st.st_size;
+	res->ro = _hdrz(res);
 
 	/* use a backing file */
 	return (cots_ss_t)res;
@@ -650,6 +665,7 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 		_s->fl = flags;
 		/* store current index offs or file size as blob offs */
 		_s->fo = be64toh(mdr->ioff) ?: st.st_size;
+		_s->ro = _hdrz(_s);
 	}
 	return 0;
 
@@ -684,6 +700,7 @@ cots_detach(cots_ss_t s)
 		_s->fd = -1;
 		_s->fl = 0;
 		_s->fo = 0;
+		_s->ro = 0;
 	}
 	return 0;
 }
