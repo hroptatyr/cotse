@@ -391,7 +391,7 @@ _flush(struct _ss_s *_s)
 	/* simply write stuff */
 	for (ssize_t nwr, rem = b.z; rem > 0; rem -= nwr) {
 		nwr = write(_s->fd, b.data + (b.z - rem), rem);
-		
+
 		if (UNLIKELY(nwr < 0)) {
 			/* truncate back to old size */
 			(void)ftruncate(_s->fd, _s->fo);
