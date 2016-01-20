@@ -332,13 +332,18 @@ _free_blob(struct blob_s b)
 	return;
 }
 
+static inline __attribute__((const)) size_t
+_hdrz(const struct _ss_s *_s)
+{
+	const size_t nflds = _s->public.nfields;
+	return sizeof(*_s->mdr) + nflds + 1U;
+}
 
 
 /* file fiddling */
 static int
 _updt_hdr(const struct _ss_s *_s)
 {
-	const size_t nflds = _s->public.nfields;
 	const size_t blkz = _s->public.blockz;
 
 	if (UNLIKELY(_s->mdr == NULL)) {
@@ -350,7 +355,7 @@ _updt_hdr(const struct _ss_s *_s)
 		_s->mdr->flags = htobe64(lgbz & 0xfU);
 	}
 	_s->mdr->ioff = htobe64(_s->fo);
-	msync_any(_s->mdr, 0U, sizeof(*_s->mdr) + nflds + 1U, MS_ASYNC);
+	msync_any(_s->mdr, 0U, _hdrz(_s), MS_ASYNC);
 	return 0;
 }
 
@@ -540,11 +545,9 @@ cots_open_ss(const char *file, int flags)
 	/* get some scratch space for this one */
 	res->pb = _make_pbuf(zrow, blkz);
 	/* map the header for reference */
-	with (off_t hz = sizeof(*res->mdr) + nflds + 1U) {
-		res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
-		if (UNLIKELY(res->mdr == NULL)) {
-			goto fre_out;
-		}
+	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
+	if (UNLIKELY(res->mdr == NULL)) {
+		goto fre_out;
 	}
 
 	/* use a backing file */
@@ -596,7 +599,7 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 
 	if (LIKELY(!st.st_size)) {
 		/* new file, yay, truncate to accomodate header */
-		off_t hz = sizeof(*mdr) + s->nfields + 1U;
+		off_t hz = _hdrz((struct _ss_s*)s);
 
 		if (UNLIKELY(ftruncate(fd, hz) < 0)) {
 			goto clo_out;
@@ -620,7 +623,7 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 
 	} else {
 		/* read file's header */
-		off_t hz = sizeof(*mdr) + s->nfields + 1U;
+		const off_t hz = _hdrz((struct _ss_s*)s);
 
 		mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
 		if (UNLIKELY(mdr == NULL)) {
@@ -651,7 +654,7 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 	return 0;
 
 unm_out:
-	munmap_any(mdr, 0, sizeof(*mdr) + s->nfields + 1U);
+	munmap_any(mdr, 0, _hdrz((struct _ss_s*)s));
 clo_out:
 	save_errno {
 		close(fd);
@@ -673,8 +676,7 @@ cots_detach(cots_ss_t s)
 		_s->public.filename = NULL;
 	}
 	if (_s->mdr) {
-		const size_t hz = sizeof(*_s->mdr) + _s->public.nfields + 1U;
-		munmap_any(_s->mdr, 0, hz);
+		munmap_any(_s->mdr, 0, _hdrz(_s));
 		_s->mdr = NULL;
 	}
 	if (_s->fd >= 0) {
