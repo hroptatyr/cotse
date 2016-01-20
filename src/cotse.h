@@ -36,7 +36,9 @@
  ***/
 #if !defined INCLUDED_cotse_h_
 #define INCLUDED_cotse_h_
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 /**
  * Time offset with respect to a point on the timeline (cots_tm_t).
