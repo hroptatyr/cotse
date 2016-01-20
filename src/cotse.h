@@ -191,7 +191,18 @@ extern int cots_write_tick(cots_ss_t, const struct cots_tick_s*);
 extern int cots_write_ticks(cots_ss_t, const struct cots_tick_s*, size_t n);
 
 /**
- * Read data tick from series, output to TGT. */
-extern ssize_t cots_read_ticks(struct cots_tsoa_s *restrict, cots_ss_t);
+ * Initialise user tsoa (struct-of-arrays) for reading.
+ * After initialisation `cots_read_ticks()' can be used and
+ * when no longer required `cots_fini_tsoa()' must be called. */
+extern int cots_init_tsoa(struct cots_tsoa_s *restrict, cots_ss_t);
+
+/**
+ * Free resources associated with the user tsoa. */
+extern int cots_fini_tsoa(struct cots_tsoa_s *restrict, cots_ss_t);
+
+/**
+ * Read data tick from series, output to TGT.
+ * TGT must be initialised using `cots_init_tsoa()' before first call. */
+extern ssize_t cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t);
 
 #endif	/* INCLUDED_cotse_h_ */

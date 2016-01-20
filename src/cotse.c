@@ -843,12 +843,72 @@ cots_write_va(cots_ss_t s, cots_to_t t, ...)
 	return cots_write_tick(s, (const void*)rp);
 }
 
+int
+cots_init_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
+{
+	const size_t blkz = s->blockz;
+	const size_t nflds = s->nfields;
+	struct pbuf_s rb = _make_pbuf(sizeof(uint64_t) * (nflds + 1U), blkz);
+
+	if (UNLIKELY((tgt->toffs = (cots_to_t*)rb.data) == NULL)) {
+		return -1;
+	}
+	for (size_t i = 0U; i < nflds; i++) {
+		tgt->cols[i] = tgt->toffs + (i + 1U) * blkz;
+	}
+	return 0;
+}
+
+int
+cots_fini_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t UNUSED(s))
+{
+	if (UNLIKELY(tgt->toffs == NULL)) {
+		return -1;
+	}
+	free(tgt->toffs);
+	return 0;
+}
+
 ssize_t
 cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 {
-	(void)s;
-	(void)tgt;
-	return 0;
+/* currently this is mmap only */
+	struct _ss_s *_s = (void*)s;
+	const size_t blkz = _s->public.blockz;
+	const size_t nflds = _s->public.nfields;
+	const char *layo = _s->public.layout;
+	size_t nt = 0U;
+	size_t mz;
+	uint8_t *mp;
+	size_t rz;
+
+	if (UNLIKELY(_s->ro >= _s->fo)) {
+		/* no recently added ticks, innit? */
+		return 0;
+	} else if (UNLIKELY(_s->fd < 0)) {
+		/* not backing file */
+		return -1;
+	}
+
+	/* guesstimate the page that needs mapping */
+	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
+	mp = mmap_any(_s->fd, PROT_READ, MAP_SHARED, _s->ro, mz);
+	if (UNLIKELY(mp == NULL)) {
+		return -1;
+	}
+
+	/* quickly inspect integrity, well update RO more importantly */
+	memcpy(&rz, mp, sizeof(rz));
+
+	/* decompress */
+	nt = dcmp(tgt, nflds, layo, mp + sizeof(rz), rz);
+
+	/* unmap */
+	munmap_any(mp, _s->ro, mz);
+
+	/* advance iterator */
+	_s->ro += rz + sizeof(rz);
+	return nt;
 }
 
 /* cotse.c ends here */
