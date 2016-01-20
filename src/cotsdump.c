@@ -107,11 +107,13 @@ main(int argc, char *argv[])
 			continue;
 		}
 
+		cots_init_tsoa(&s.proto, hdl);
 		while ((n = cots_read_ticks(&s.proto, hdl)) > 0) {
 			fprintf(stderr, "got %zd ticks\n", n);
 			dump(s, n);
 		}
-		fprintf(stderr, "%p\n", hdl);
+		fprintf(stderr, "%p  %zd\n", hdl, n);
+		cots_fini_tsoa(&s.proto, hdl);
 		cots_close_ss(hdl);
 	}
 	return rc;
