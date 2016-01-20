@@ -82,13 +82,13 @@ serror(const char *fmt, ...)
 }
 
 static struct samp_s
-push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
+push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 {
 	char *on;
 	long unsigned int s, x;
 	cots_px_t b;
 	cots_qx_t q;
-	cots_tag_t m;
+	cots_tag_t m = 1U;
 
 	if (line[20U] != '\t') {
 		return (struct samp_s){{0U}, 0U};
@@ -103,9 +103,6 @@ push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 
 	with (const char *ecn = ++on) {
 		if (UNLIKELY((on = strchr(ecn, '\t')) == NULL)) {
-			return (struct samp_s){{0U}, 0U};
-		} else if (UNLIKELY(!(m = cots_tag(ts, ecn, on - ecn)))) {
-			/* fuck */
 			return (struct samp_s){{0U}, 0U};
 		}
 	}
@@ -128,15 +125,14 @@ push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 int
 main(int argc, char *argv[])
 {
-	cots_ts_t db;
+	cots_ss_t db;
 	int rc = 0;
 	char *line = NULL;
 	size_t llen = 0U;
 
-	if ((db = make_cots_ts("mpq", 0U)) == NULL) {
+	if ((db = make_cots_ss("mpq", 0U)) == NULL) {
 		return 1;
 	}
-	cots_put_fields(db, (const char*[]){"SOURCE", "BID", "SIZE"});
 
 	with (const char *fn = argv[1U]) {
 		size_t i = 0U;
@@ -161,7 +157,7 @@ main(int argc, char *argv[])
 		}
 	}
 	free(line);
-	free_cots_ts(db);
+	free_cots_ss(db);
 	return rc;
 }
 

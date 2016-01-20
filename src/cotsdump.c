@@ -97,11 +97,11 @@ main(int argc, char *argv[])
 	int rc = 0;
 
 	for (int i = 1; i < argc; i++) {
-		cots_ts_t hdl;
+		cots_ss_t hdl;
 		struct samp_s s;
 		ssize_t n;
 
-		if ((hdl = cots_open_ts(argv[i], O_RDONLY)) == NULL) {
+		if ((hdl = cots_open_ss(argv[i], O_RDONLY)) == NULL) {
 			serror("Error: cannot open file `%s'", argv[i]);
 			rc = 1;
 			continue;
@@ -112,7 +112,7 @@ main(int argc, char *argv[])
 			dump(s, n);
 		}
 		fprintf(stderr, "%p\n", hdl);
-		cots_close_ts(hdl);
+		cots_close_ss(hdl);
 	}
 	return rc;
 }
