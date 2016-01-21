@@ -110,7 +110,7 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 			case COTS_LO_TAG:
 			case COTS_LO_SIZ: {
 				uint64_t *zp = cols->cols[j];
-				fprintf(stdout, "\t%lu", zp[j]);
+				fprintf(stdout, "\t%lu", zp[i]);
 				break;
 			}
 			default:
