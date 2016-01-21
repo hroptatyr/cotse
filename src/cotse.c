@@ -258,8 +258,8 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 	}
 
 	/* trial mmap */
-	bi = Z(sizeof(uint64_t), nrows);
-	bsz = bi + Z(pb.zrow, nrows);
+	bi = Z(pb.zrow, nrows > 64U ? nrows : 64U);
+	bsz = 2U * bi;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
