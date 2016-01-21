@@ -40,6 +40,7 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
+#include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
 #include "cotse.h"
@@ -85,7 +86,13 @@ nul_out:
 void
 free_cots_idx(cots_idx_t s)
 {
+	const size_t idxfz = strlen(s->filename);
+	char idxfn[idxfz + 1U/*\nul*/];
+
+	memcpy(idxfn, s->filename, idxfz + 1U/*\nul*/);
 	free_cots_ss(s);
+	/* blindly rm him */
+	(void)unlink(idxfn);
 	return;
 }
 
