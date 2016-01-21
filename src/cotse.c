@@ -75,10 +75,10 @@ struct fhdr_s {
 	/* tba
 	 * - lowest 4bits of flags is the log2 of the block size minus 9 */
 	uint64_t flags;
-	/* offset to index pages */
-	uint64_t ioff;
-	/* offset to obarray */
-	uint64_t ooff;
+	/* offset to meta */
+	uint64_t moff;
+	/* offset to next series (presumably the index series) */
+	uint64_t noff;
 	/* layout, \nul term'd */
 	uint8_t layout[];
 };
@@ -358,7 +358,7 @@ _hdrz(const struct _ss_s *_s)
 
 /* file fiddling */
 static int
-_updt_hdr(const struct _ss_s *_s)
+_updt_hdr(const struct _ss_s *_s, size_t metaz)
 {
 	const size_t blkz = _s->public.blockz;
 
@@ -370,7 +370,8 @@ _updt_hdr(const struct _ss_s *_s)
 	with (unsigned int lgbz = __builtin_ctz(blkz) - 9U) {
 		_s->mdr->flags = htobe64(lgbz & 0xfU);
 	}
-	_s->mdr->ioff = htobe64(_s->fo);
+	_s->mdr->moff = htobe64(_s->fo);
+	_s->mdr->noff = htobe64(_s->fo + metaz);
 	msync_any(_s->mdr, 0U, _hdrz(_s), MS_ASYNC);
 	return 0;
 }
@@ -382,6 +383,7 @@ _flush(struct _ss_s *_s)
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
 	struct blob_s b;
+	size_t metaz = 0U;
 	int rc = 0;
 
 	if (UNLIKELY(!_s->pb.rowi)) {
@@ -423,10 +425,32 @@ _flush(struct _ss_s *_s)
 			(struct orng_s){_s->fo, _s->fo + b.z},
 			_s->pb.rowi);
 	}
+
 	/* advance file offset and celebrate */
 	_s->fo += b.z;
+
+	/* put stuff like field names, obarray, etc. into the meta section
+	 * this will not update the FO */
+	if (_s->fields) {
+		const char *_1st = _s->public.fields[0U];
+		const char *last = _s->public.fields[nflds - 1U];
+
+		metaz = last - _1st + strlen(last) + 1U;
+	}
+	/* manifest in file */
+	if (metaz) {
+		ssize_t nwr = write(_s->fd, (_s->fields ?: nul_layout), metaz);
+
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			(void)ftruncate(_s->fd, _s->fo);
+			rc = -1;
+			goto fre_out;
+		}
+	}
+
 	/* update header */
-	_updt_hdr(_s);
+	_updt_hdr(_s, metaz);
 
 fre_out:
 	_free_blob(b);
@@ -583,7 +607,7 @@ cots_open_ss(const char *file, int flags)
 	/* collect details about this backing file */
 	res->fd = fd;
 	res->fl = flags;
-	res->fo = be64toh(res->mdr->ioff) ?: st.st_size;
+	res->fo = be64toh(res->mdr->moff) ?: st.st_size;
 	res->ro = _hdrz(res);
 
 	/* use a backing file */
@@ -685,7 +709,7 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 		_s->fd = fd;
 		_s->fl = flags;
 		/* store current index offs or file size as blob offs */
-		_s->fo = be64toh(mdr->ioff) ?: st.st_size;
+		_s->fo = be64toh(mdr->moff) ?: st.st_size;
 		_s->ro = _hdrz(_s);
 	}
 	return 0;
