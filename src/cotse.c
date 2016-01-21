@@ -424,9 +424,14 @@ rst_out:
 cots_ss_t
 make_cots_ss(const char *layout, size_t blockz)
 {
-	struct _ss_s *res = calloc(1, sizeof(*res));
+	struct _ss_s *res;
 	size_t laylen;
 	size_t zrow;
+
+	if (UNLIKELY((res = calloc(1U, sizeof(*res))) == NULL)) {
+		/* nothing we can do, is there */
+		return NULL;
+	}
 
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
