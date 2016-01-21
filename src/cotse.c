@@ -711,66 +711,6 @@ cots_detach(cots_ss_t s)
 }
 
 
-#if 0
-/* this is high level stuff and needs moving */
-cots_tag_t
-cots_tag(cots_ts_t s, const char *str, size_t len)
-{
-	struct _ts_s *_s = (void*)s;
-	return cots_intern(_s->obarray, str, len);
-}
-
-int
-cots_put_fields(cots_ts_t s, const char **fields)
-{
-	struct _ts_s *_s = (void*)s;
-	const size_t nfields = _s->public.nfields;
-	const char *const *old = _s->public.fields;
-	const char **new = calloc(nfields + 1U, sizeof(*new));
-	char *flds;
-
-	if (UNLIKELY(new == NULL)) {
-		return -1;
-	}
-	for (size_t i = 0U; i < nfields; i++) {
-		const size_t this = strlen(fields[i]);
-		const size_t prev = (uintptr_t)new[i];
-		new[i + 1U] = (void*)(uintptr_t)(prev + this + 1U/*\nul*/);
-	}
-	/* make the big compacted array */
-	with (size_t ztot = (uintptr_t)new[nfields], o = 0U) {
-		flds = calloc(ztot, sizeof(*flds));
-
-		if (UNLIKELY(flds == NULL)) {
-			free(new);
-			return -1;
-		}
-
-		/* compactify */
-		for (size_t i = 0U; i < nfields; i++) {
-			const size_t len = (uintptr_t)new[i + 1U] - o;
-			memcpy(flds + o, fields[i], len);
-			o += len;
-		}
-
-		/* update actual field pointers in new */
-		for (size_t i = 0U; i < nfields; i++) {
-			new[i] = flds + (uintptr_t)new[i];
-		}
-		new[nfields] = NULL;
-	}
-	/* swap old for new */
-	_s->public.fields = new;
-	if (UNLIKELY(old != NULL)) {
-		free(deconst(old));
-		free(_s->fields);
-	}
-	_s->fields = flds;
-	return 0;
-}
-#endif
-
-
 int
 cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
 {
