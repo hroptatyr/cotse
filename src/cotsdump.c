@@ -74,18 +74,51 @@ serror(const char *fmt, ...)
 }
 
 static void
-dump(const struct samp_s s, size_t n)
+dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 {
 	for (size_t i = 0U; i < n; i++) {
-		cots_to_t t = s.proto.toffs[i];
-		char p[32U];
-		char q[64U];
+		with (cots_to_t t = cols->toffs[i]) {
+			fprintf(stdout, "%lu.%09lu",
+				t / 1000000000U, t % 1000000000U);
+		}
+		for (size_t j = 0U; j < hdl->nfields; j++) {
+			char buf[64U];
 
-		d32tostr(p, sizeof(p), s.b[i]);
-		d64tostr(q, sizeof(q), s.q[i]);
-
-		printf("%lu.%09lu\t%lu\t%s\t%s\n",
-		       t / 1000000000U, t % 1000000000U, s.m[i], p, q);
+			switch (hdl->layout[j]) {
+			case COTS_LO_PRC: {
+				cots_px_t *pp = cols->cols[j];
+				d32tostr(buf, sizeof(buf), pp[i]);
+				fputc('\t', stdout);
+				fputs(buf, stdout);
+				break;
+			}
+			case COTS_LO_QTY: {
+				cots_qx_t *qp = cols->cols[j];
+				d64tostr(buf, sizeof(buf), qp[i]);
+				fputc('\t', stdout);
+				fputs(buf, stdout);
+				break;
+			}
+			case COTS_LO_TIM: {
+				cots_to_t *tp = cols->cols[j];
+				cots_to_t t = tp[i];
+				fprintf(stdout, "\t%lu.%09lu",
+					t % 1000000000U, t % 1000000000U);
+				break;
+			}
+			case COTS_LO_CNT:
+			case COTS_LO_TAG:
+			case COTS_LO_SIZ: {
+				uint64_t *zp = cols->cols[j];
+				fprintf(stdout, "\t%lu", zp[j]);
+				break;
+			}
+			default:
+				fputs("\tUNK", stdout);
+				break;
+			}
+		}
+		fputc('\n', stdout);
 	}
 	return;
 }
@@ -98,7 +131,6 @@ main(int argc, char *argv[])
 
 	for (int i = 1; i < argc; i++) {
 		cots_ss_t hdl;
-		struct samp_s s;
 		ssize_t n;
 
 		if ((hdl = cots_open_ss(argv[i], O_RDONLY)) == NULL) {
@@ -107,13 +139,16 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-		cots_init_tsoa(&s.proto, hdl);
-		while ((n = cots_read_ticks(&s.proto, hdl)) > 0) {
-			fprintf(stderr, "got %zd ticks\n", n);
-			dump(s, n);
+		/* use a generic tsoa */
+		with (void *_cols[hdl->nfields + 1U], *cols = (void*)_cols) {
+			cots_init_tsoa(cols, hdl);
+			while ((n = cots_read_ticks(cols, hdl)) > 0) {
+				fprintf(stderr, "got %zd ticks\n", n);
+				dump(hdl, cols, n);
+			}
+			fprintf(stderr, "%p  %zd\n", hdl, n);
+			cots_fini_tsoa(cols, hdl);
 		}
-		fprintf(stderr, "%p  %zd\n", hdl, n);
-		cots_fini_tsoa(&s.proto, hdl);
 		cots_close_ss(hdl);
 	}
 	return rc;
