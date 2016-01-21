@@ -60,7 +60,7 @@ struct samp_s {
 	struct cots_tick_s proto;
 	cots_tag_t m;
 	cots_px_t b;
-	cots_qx_t q;
+	cots_qx_t a;
 };
 
 
@@ -87,7 +87,7 @@ push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 	char *on;
 	long unsigned int s, x;
 	cots_px_t b;
-	cots_qx_t q;
+	cots_qx_t a;
 	cots_tag_t m = 1U;
 
 	if (line[20U] != '\t') {
@@ -114,11 +114,11 @@ push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 	}
 
 	if (*++on != '\n') {
-		q = strtoqx(on, &on);
+		a = strtopx(on, &on);
 	} else {
-		q = COTS_QX_MISS.d64;
+		a = COTS_PX_MISS.d32;
 	}
-	return (struct samp_s){{s}, m, b, q};
+	return (struct samp_s){{s}, m, b, a};
 }
 
 
@@ -130,13 +130,12 @@ main(int argc, char *argv[])
 	char *line = NULL;
 	size_t llen = 0U;
 
-	if ((db = make_cots_ss("mpq", 0U)) == NULL) {
+	if ((db = make_cots_ss("mpp", 0U)) == NULL) {
 		return 1;
 	}
+	cots_put_fields(db, (const char*[]){"source", "bid", "ask"});
 
 	with (const char *fn = argv[1U]) {
-		size_t i = 0U;
-
 		if (UNLIKELY(fn == NULL)) {
 			uerror("Warning: no file specified");
 		} else if (cots_attach(db, fn, O_CREAT | O_RDWR) < 0) {
@@ -150,9 +149,6 @@ main(int argc, char *argv[])
 
 			if (x.m) {
 				cots_write_tick(db, &x.proto);
-			}
-			if (++i >= 1000000) {
-				break;
 			}
 		}
 	}
