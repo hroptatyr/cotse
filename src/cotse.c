@@ -883,4 +883,55 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 	return nt;
 }
 
+
+/* meta stuff */
+int
+cots_put_fields(cots_ss_t s, const char **fields)
+{
+	struct _ss_s *_s = (void*)s;
+	const size_t nfields = _s->public.nfields;
+	const char *const *old = _s->public.fields;
+	const char **new = calloc(nfields + 1U, sizeof(*new));
+	char *flds;
+
+	if (UNLIKELY(new == NULL)) {
+		return -1;
+	}
+	for (size_t i = 0U; i < nfields; i++) {
+		const size_t this = strlen(fields[i]);
+		const size_t prev = (uintptr_t)new[i];
+		new[i + 1U] = (void*)(uintptr_t)(prev + this + 1U/*\nul*/);
+	}
+	/* make the big compacted array */
+	with (size_t ztot = (uintptr_t)new[nfields], o = 0U) {
+		flds = calloc(ztot, sizeof(*flds));
+
+		if (UNLIKELY(flds == NULL)) {
+			free(new);
+			return -1;
+		}
+
+		/* compactify */
+		for (size_t i = 0U; i < nfields; i++) {
+			const size_t len = (uintptr_t)new[i + 1U] - o;
+			memcpy(flds + o, fields[i], len);
+			o += len;
+		}
+
+		/* update actual field pointers in new */
+		for (size_t i = 0U; i < nfields; i++) {
+			new[i] = flds + (uintptr_t)new[i];
+		}
+		new[nfields] = NULL;
+	}
+	/* swap old for new */
+	_s->public.fields = new;
+	if (UNLIKELY(old != NULL)) {
+		free(deconst(old));
+		free(_s->fields);
+	}
+	_s->fields = flds;
+	return 0;
+}
+
 /* cotse.c ends here */
