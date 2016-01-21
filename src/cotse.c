@@ -46,6 +46,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "cotse.h"
+#include "index.h"
 #include "comp.h"
 #include "intern.h"
 #include "boobs.h"
@@ -117,6 +118,9 @@ struct _ss_s {
 	off_t fo;
 	/* current offset for reading */
 	off_t ro;
+
+	/* index, if any, this will be recursive */
+	cots_idx_t idx;
 };
 
 static const char nul_layout[] = "";
@@ -407,6 +411,14 @@ _flush(struct _ss_s *_s)
 			goto fre_out;
 		}
 	}
+	/* add to index */
+	if (_s->idx) {
+		cots_add_index(
+			_s->idx,
+			(struct trng_s){b.from, b.till},
+			(struct orng_s){_s->fo, _s->fo + b.z},
+			_s->pb.rowi);
+	}
 	/* advance file offset and celebrate */
 	_s->fo += b.z;
 	/* update header */
@@ -686,10 +698,16 @@ clo_out:
 int
 cots_detach(cots_ss_t s)
 {
+/* this is the authority in closing,
+ * both free_cots_ss() and cots_close_ss() will unconditionally call this. */
 	struct _ss_s *_s = (void*)s;
 
 	if (_s->fd >= 0) {
 		_flush(_s);
+	}
+
+	if (_s->idx) {
+		free_cots_idx(_s->idx);
 	}
 
 	if (_s->public.filename) {
@@ -728,9 +746,12 @@ cots_keep_last(cots_ss_t s)
 	int rc = 0;
 
 	if (UNLIKELY(++_s->pb.rowi == blkz)) {
+		/* just for now */
+		if (!_s->idx) {
+			_s->idx = make_cots_idx(_s->public.filename);
+		}
 		/* auto-eviction */
 		rc = _flush(_s);
-		_s->pb.rowi = 0U;
 	}
 	return rc;
 }

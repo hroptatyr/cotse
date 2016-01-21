@@ -40,7 +40,11 @@
 #if defined HAVE_CONFIG_H
 # include "config.h"
 #endif	/* HAVE_CONFIG_H */
+#include <string.h>
+#include <fcntl.h>
+#include "cotse.h"
 #include "index.h"
+#include "nifty.h"
 
 struct idxt_s {
 	struct cots_tick_s proto;
@@ -50,15 +54,39 @@ struct idxt_s {
 
 
 cots_idx_t
-make_cots_idx(void)
+make_cots_idx(const char *filename)
 {
-	return make_cots_ss("cz", 512U);
+	cots_ss_t res;
+
+	if (UNLIKELY(filename == NULL)) {
+		goto nul_out;
+	} else if (UNLIKELY((res = make_cots_ss("cz", 512U)) == NULL)) {
+		goto nul_out;
+	}
+	/* construct temp filename */
+	with (size_t z = strlen(filename)) {
+		char idxfn[z + 5U];
+		const int idxfl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
+
+		memcpy(idxfn, filename, z);
+		memcpy(idxfn + z, ".idx", sizeof(".idx"));
+		if (UNLIKELY(cots_attach(res, idxfn, idxfl) < 0)) {
+			goto fre_out;
+		}
+	}
+	return res;
+
+fre_out:
+	free_cots_ss(res);
+nul_out:
+	return NULL;
 }
 
 void
 free_cots_idx(cots_idx_t s)
 {
 	free_cots_ss(s);
+	return;
 }
 
 int
