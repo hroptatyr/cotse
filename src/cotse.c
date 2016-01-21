@@ -212,7 +212,9 @@ _algn_zrow(const char *layout, size_t nflds)
 			inc = 4U;
 			break;
 		case COTS_LO_TIM:
+		case COTS_LO_CNT:
 		case COTS_LO_TAG:
+		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
 			/* round Z up to next 8 multiple */
@@ -298,7 +300,9 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 			break;
 		}
 		case COTS_LO_TIM:
+		case COTS_LO_CNT:
 		case COTS_LO_TAG:
+		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols.cols[i];
@@ -793,7 +797,9 @@ cots_write_va(cots_ss_t s, cots_to_t t, ...)
 			break;
 		}
 		case COTS_LO_TIM:
+		case COTS_LO_CNT:
 		case COTS_LO_TAG:
+		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *cp = (uint64_t*)(rp + a);
