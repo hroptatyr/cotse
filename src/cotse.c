@@ -239,7 +239,7 @@ _make_pbuf(size_t zrow, size_t blkz)
 static struct blob_s
 _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 {
-#define Z(zrow, nrows)	(3U * nrows * zrow / 2U)
+#define Z(zrow, nrows)	(3U * (nrows) * (zrow) / 2U)
 	struct {
 		struct cots_tsoa_s proto;
 		void *cols[nflds];
