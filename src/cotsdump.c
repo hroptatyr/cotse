@@ -172,10 +172,8 @@ main(int argc, char *argv[])
 		with (void *_cols[hdl->nfields + 1U], *cols = (void*)_cols) {
 			cots_init_tsoa(cols, hdl);
 			while ((n = cots_read_ticks(cols, hdl)) > 0) {
-				fprintf(stderr, "got %zd ticks\n", n);
 				dump(hdl, cols, n);
 			}
-			fprintf(stderr, "%p  %zd\n", hdl, n);
 			cots_fini_tsoa(cols, hdl);
 		}
 		cots_close_ss(hdl);
