@@ -76,6 +76,43 @@ serror(const char *fmt, ...)
 	return;
 }
 
+static size_t
+ui64tostr(char *restrict buf, size_t bsz, uint64_t n)
+{
+	size_t bi = 0U;
+
+	/* leave a 0 either way */
+	buf[0U] = '0';
+	for (; bi < bsz && n; n /= 10ULL, bi++) {
+		buf[bi] = '0' ^ (n % 10ULL);
+	}
+	/* reverse */
+	for (size_t i = 0U, k = bi - 1U; i < bi / 2U; i++) {
+		register char bk = buf[k - i];
+		buf[k - i] = buf[i];
+		buf[i] = bk;
+	}
+	return bi ?: 1U;
+}
+
+static size_t
+totostr(char *restrict buf, size_t bsz, cots_to_t toff)
+{
+	uint64_t div = toff / 1000000000ULL;
+	uint64_t rem = toff % 1000000000ULL;
+	size_t bi = 0U;
+
+	/* just ordinary number printing */
+	bi = ui64tostr(buf, bsz, div);
+	/* now . and remainder */
+	buf[bi++] = '.';
+	for (size_t i = bi + 9ULL; i > bi; rem /= 10ULL) {
+		buf[--i] = '0' ^ (rem % 10ULL);
+	}
+	return bi + 9ULL;
+}
+
+
 static void
 dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 {
@@ -118,9 +155,7 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 				*lp++ = '\t';
 
 			ini_tim:
-				lp += snprintf(
-					lp, lz, "%lu.%09lu",
-					t / 1000000000U, t % 1000000000U);
+				lp += totostr(lp, lz, t);
 				break;
 			}
 			case COTS_LO_CNT:
@@ -129,7 +164,7 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 				uint64_t *zp = cols->cols[j];
 
 				*lp++ = '\t';
-				lp += snprintf(lp, lz, "%lu", zp[i]);
+				lp += ui64tostr(lp, lz, zp[i]);
 				break;
 			}
 			default:
