@@ -358,15 +358,9 @@ _hdrz(const struct _ss_s *_s)
 static int
 _updt_hdr(const struct _ss_s *_s, size_t metaz)
 {
-	const size_t blkz = _s->public.blockz;
-
 	if (UNLIKELY(_s->mdr == NULL)) {
 		/* great */
 		return 0;
-	}
-	/* keep track of block size */
-	with (unsigned int lgbz = __builtin_ctz(blkz) - 9U) {
-		_s->mdr->flags = htobe64(lgbz & 0xfU);
 	}
 	_s->mdr->moff = htobe64(_s->fo);
 	_s->mdr->noff = htobe64(_s->fo + metaz);
@@ -658,6 +652,8 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 	if (LIKELY(!st.st_size)) {
 		/* new file, yay, truncate to accomodate header */
 		off_t hz = _hdrz((struct _ss_s*)s);
+		/* calculate blocksize for header */
+		unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
 
 		if (UNLIKELY(ftruncate(fd, hz) < 0)) {
 			goto clo_out;
@@ -669,6 +665,9 @@ cots_attach(cots_ss_t s, const char *file, int flags)
 		}
 		/* bang a basic header out */
 		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
+			/* keep track of block size */
+			proto.flags = htobe64(lgbz & 0xfU);
+
 			memcpy(mdr, &proto, sizeof(*mdr));
 			memcpy(mdr->layout, s->layout, s->nfields + 1U);
 		}
