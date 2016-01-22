@@ -229,17 +229,28 @@ _algn_zrow(const char *layout, size_t nflds)
 			break;
 		case COTS_LO_END:
 		default:
+			z = ALGN8(z);
+			inc = 0U;
 			break;
 		}
 	}
 	return z;
 }
 
-static struct pbuf_s
+static inline struct pbuf_s
 _make_pbuf(size_t zrow, size_t blkz)
 {
 	void *data = calloc(blkz, zrow);
 	return (struct pbuf_s){zrow, 0U, data};
+}
+
+static inline void
+_free_pbuf(struct pbuf_s pb)
+{
+	if (LIKELY(pb.data != NULL)) {
+		free(pb.data);
+	}
+	return;
 }
 
 static struct blob_s
@@ -359,6 +370,19 @@ _hdrz(const struct _ss_s *_s)
 {
 	const size_t nflds = _s->public.nfields;
 	return sizeof(*_s->mdr) + nflds + 1U;
+}
+
+static inline cots_to_t
+_last_toff(const struct _ss_s *_s)
+{
+/* obtain the time-offset of the last kept tick */
+	const cots_to_t *const tp = (void*)_s->pb.data;
+
+	if (UNLIKELY(!_s->pb.rowi)) {
+		return 0U;
+	}
+	/* otherwise we're lucky, apart from breaking the cache line */
+	return tp[_s->pb.rowi * _s->pb.zrow / sizeof(cots_to_t)];
 }
 
 
@@ -555,9 +579,7 @@ free_cots_ss(cots_ss_t ss)
 		free(deconst(_ss->public.fields));
 		free(_ss->fields);
 	}
-	if (LIKELY(_ss->pb.data != NULL)) {
-		free(_ss->pb.data);
-	}
+	_free_pbuf(_ss->pb);
 	free(_ss);
 	return;
 }
@@ -832,6 +854,11 @@ cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
 {
 	struct _ss_s *_s = (void*)s;
 
+	if (UNLIKELY(data->toff < _last_toff(_s))) {
+		/* can't go back in time */
+		return -1;
+	}
+	/* otherwise bang */
 	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
 	return 0;
 }
@@ -858,11 +885,9 @@ cots_keep_last(cots_ss_t s)
 int
 cots_write_tick(cots_ss_t s, const struct cots_tick_s *data)
 {
-	int rc = 0;
-
-	rc += cots_bang_tick(s, data);
-	rc += cots_keep_last(s);
-	return rc;
+	return !(cots_bang_tick(s, data) < 0)
+		? cots_keep_last(s)
+		: -1;
 }
 
 int
