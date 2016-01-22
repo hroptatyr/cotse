@@ -60,8 +60,6 @@
 # define MAP_ANON	MAP_ANONYMOUS
 #endif	/* !MAP_ANON */
 
-#define NTIDX		(512U)
-
 #define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
 #define ALGN8(x)	((uintptr_t)((x) + 0x7U) & ~0x7ULL)
 #define ALGN4(x)	((uintptr_t)((x) + 0x3U) & ~0x3ULL)
