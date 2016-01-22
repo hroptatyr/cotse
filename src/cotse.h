@@ -205,4 +205,9 @@ extern int cots_fini_tsoa(struct cots_tsoa_s *restrict, cots_ss_t);
  * TGT must be initialised using `cots_init_tsoa()' before first call. */
 extern ssize_t cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t);
 
+
+/* not so public stuff */
+/* Half-way detach. */
+extern int cots_freeze(cots_ss_t);
+
 #endif	/* INCLUDED_cotse_h_ */

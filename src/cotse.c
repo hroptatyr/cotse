@@ -43,6 +43,9 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#if defined HAVE_SYS_SENDFILE_H
+# include <sys/sendfile.h>
+#endif	/* HAVE_SYS_SENDFILE_H */
 #include <fcntl.h>
 #include <errno.h>
 #include "cotse.h"
@@ -451,6 +454,44 @@ rst_out:
 	return rc;
 }
 
+static ssize_t
+_cat(struct _ss_s *restrict _s, const struct cots_ss_s *src)
+{
+/* sendfile(3) disk data from SRC to _S */
+	const struct _ss_s *_src = (const void*)src;
+	struct stat st;
+	ssize_t fz;
+	off_t so = 0;
+
+	if (UNLIKELY(_src->fd < 0)) {
+		/* bollocks */
+		return -1;
+	} else if (UNLIKELY(fstat(_s->fd, &st) < 0)) {
+		/* interesting */
+		return -1;
+	} else if (UNLIKELY((fz = st.st_size) < 0)) {
+		/* right, what are we, a freak show? */
+		return -1;
+	} else if (UNLIKELY(fstat(_src->fd, &st) < 0)) {
+		/* no work today? i'm going home */
+		return -1;
+	}
+
+	while (so < st.st_size) {
+		ssize_t nsf = sendfile(_s->fd, _src->fd, &so, st.st_size - so);
+
+		if (UNLIKELY(nsf <= 0)) {
+			goto tru_out;
+		}
+	}
+	return so;
+
+tru_out:
+	/* we can't do with failures, better reset this thing */
+	(void)ftruncate(_s->fd, fz);
+	return -1;
+}
+
 
 /* public series storage API */
 cots_ss_t
@@ -727,14 +768,12 @@ cots_detach(cots_ss_t s)
  * both free_cots_ss() and cots_close_ss() will unconditionally call this. */
 	struct _ss_s *_s = (void*)s;
 
-	if (_s->fd >= 0) {
-		_flush(_s);
-	}
+	cots_freeze(s);
 
 	if (_s->idx) {
+		/* assume index has been dealt with in _freeze() */
 		free_cots_idx(_s->idx);
 	}
-
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
 		_s->public.filename = NULL;
@@ -751,6 +790,31 @@ cots_detach(cots_ss_t s)
 		_s->ro = 0;
 	}
 	return 0;
+}
+
+int
+cots_freeze(cots_ss_t s)
+{
+	struct _ss_s *_s = (void*)s;
+	int rc;
+
+	if (UNLIKELY(_s->fd < 0)) {
+		/* not on my watch */
+		return -1;
+	}
+
+	/* flush wal to file */
+	rc = _flush(_s);
+
+	if (_s->idx) {
+		/* this is bad coupling:
+		 * we know _s->idx is in fact a normal _ss_s object
+		 * just freeze things here,
+		 * then use its fd and sendfile(3) to append index */
+		cots_freeze(_s->idx);
+		_cat(_s, _s->idx);
+	}
+	return rc;
 }
 
 
