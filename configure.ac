@@ -38,6 +38,9 @@ AX_YUCK_SCMVER([version.mk])
 AC_CONFIG_LINKS([GNUmakefile:GNUmakefile])
 
 
+## check for file handling goodness
+AC_CHECK_HEADERS([sys/sendfile.h])
+
 ## This is the main macro
 SXE_CHECK_DFP754
 
