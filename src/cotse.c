@@ -867,11 +867,9 @@ cots_keep_last(cots_ss_t s)
 int
 cots_write_tick(cots_ss_t s, const struct cots_tick_s *data)
 {
-	int rc = 0;
-
-	rc += cots_bang_tick(s, data);
-	rc += cots_keep_last(s);
-	return rc;
+	return !(cots_bang_tick(s, data) < 0)
+		? cots_keep_last(s)
+		: -1;
 }
 
 int
