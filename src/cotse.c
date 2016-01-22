@@ -372,6 +372,19 @@ _hdrz(const struct _ss_s *_s)
 	return sizeof(*_s->mdr) + nflds + 1U;
 }
 
+static inline cots_to_t
+_last_toff(const struct _ss_s *_s)
+{
+/* obtain the time-offset of the last kept tick */
+	const cots_to_t *const tp = (void*)_s->pb.data;
+
+	if (UNLIKELY(!_s->pb.rowi)) {
+		return 0U;
+	}
+	/* otherwise we're lucky, apart from breaking the cache line */
+	return tp[_s->pb.rowi * _s->pb.zrow / sizeof(cots_to_t)];
+}
+
 
 /* file fiddling */
 static int
@@ -841,6 +854,11 @@ cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
 {
 	struct _ss_s *_s = (void*)s;
 
+	if (UNLIKELY(data->toff < _last_toff(_s))) {
+		/* can't go back in time */
+		return -1;
+	}
+	/* otherwise bang */
 	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
 	return 0;
 }
