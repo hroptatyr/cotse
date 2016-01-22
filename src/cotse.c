@@ -244,6 +244,15 @@ _make_pbuf(size_t zrow, size_t blkz)
 	return (struct pbuf_s){zrow, 0U, data};
 }
 
+static void
+_free_pbuf(struct pbuf_s pb)
+{
+	if (LIKELY(pb.data != NULL)) {
+		free(pb.data);
+	}
+	return;
+}
+
 static struct blob_s
 _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 {
@@ -557,9 +566,7 @@ free_cots_ss(cots_ss_t ss)
 		free(deconst(_ss->public.fields));
 		free(_ss->fields);
 	}
-	if (LIKELY(_ss->pb.data != NULL)) {
-		free(_ss->pb.data);
-	}
+	_free_pbuf(_ss->pb);
 	free(_ss);
 	return;
 }
