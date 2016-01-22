@@ -83,10 +83,11 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 		char *lp = line;
 #define lz	(size_t)(line + llen - lp)
 		cots_to_t t = cols->toffs[i];
+		size_t j = 0U;
 
 		goto ini_tim;
 
-		for (size_t j = 0U; j < hdl->nfields; j++) {
+		for (; j < hdl->nfields; j++) {
 			if (UNLIKELY(lz < llen / 4U)) {
 				/* not enough breathing space */
 				line = realloc(line, llen *= 2U);
