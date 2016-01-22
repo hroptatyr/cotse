@@ -83,7 +83,7 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 		char *lp = line;
 #define lz	(size_t)(line + llen - lp)
 		cots_to_t t = cols->toffs[i];
-		size_t j = 0U;
+		size_t j = -1ULL;
 
 		goto ini_tim;
 
