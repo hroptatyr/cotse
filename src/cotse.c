@@ -229,6 +229,8 @@ _algn_zrow(const char *layout, size_t nflds)
 			break;
 		case COTS_LO_END:
 		default:
+			z = ALGN8(z);
+			inc = 0U;
 			break;
 		}
 	}
