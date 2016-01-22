@@ -60,7 +60,7 @@ struct samp_s {
 	struct cots_tick_s proto;
 	cots_tag_t m;
 	cots_px_t b;
-	cots_qx_t a;
+	cots_px_t a;
 };
 
 
@@ -87,7 +87,7 @@ push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 	char *on;
 	long unsigned int s, x;
 	cots_px_t b;
-	cots_qx_t a;
+	cots_px_t a;
 	cots_tag_t m = 1U;
 
 	if (line[20U] != '\t') {
