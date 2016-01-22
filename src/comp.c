@@ -77,6 +77,7 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 			break;
 		}
 
+		case COTS_LO_CNT:
 		case COTS_LO_TIM: {
 			cots_to_t *c = cols->cols[i];
 
@@ -86,6 +87,7 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 			break;
 		}
 
+		case COTS_LO_SIZ:
 		case COTS_LO_TAG: {
 			cots_tag_t *c = cols->cols[i];
 
@@ -143,6 +145,7 @@ dcmp(struct cots_tsoa_s *restrict cols,
 			break;
 		}
 
+		case COTS_LO_CNT:
 		case COTS_LO_TIM: {
 			cots_to_t *c = cols->cols[i];
 
@@ -153,6 +156,7 @@ dcmp(struct cots_tsoa_s *restrict cols,
 			break;
 		}
 
+		case COTS_LO_SIZ:
 		case COTS_LO_TAG: {
 			cots_tag_t *c = cols->cols[i];
 

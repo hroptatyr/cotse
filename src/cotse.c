@@ -43,9 +43,13 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#if defined HAVE_SYS_SENDFILE_H
+# include <sys/sendfile.h>
+#endif	/* HAVE_SYS_SENDFILE_H */
 #include <fcntl.h>
 #include <errno.h>
 #include "cotse.h"
+#include "index.h"
 #include "comp.h"
 #include "intern.h"
 #include "boobs.h"
@@ -58,8 +62,6 @@
 #ifndef MAP_ANON
 # define MAP_ANON	MAP_ANONYMOUS
 #endif	/* !MAP_ANON */
-
-#define NTIDX		(512U)
 
 #define ALGN16(x)	((uintptr_t)((x) + 0xfU) & ~0xfULL)
 #define ALGN8(x)	((uintptr_t)((x) + 0x7U) & ~0x7ULL)
@@ -74,19 +76,12 @@ struct fhdr_s {
 	/* tba
 	 * - lowest 4bits of flags is the log2 of the block size minus 9 */
 	uint64_t flags;
-	/* offset to index pages */
-	uint64_t ioff;
-	/* offset to obarray */
-	uint64_t ooff;
+	/* offset to meta */
+	uint64_t moff;
+	/* offset to next series (presumably the index series) */
+	uint64_t noff;
 	/* layout, \nul term'd */
 	uint8_t layout[];
-};
-
-struct idx_s {
-	/* time-offsets */
-	cots_to_t t[NTIDX];
-	/* offset into file */
-	uint64_t z[NTIDX];
 };
 
 struct blob_s {
@@ -105,8 +100,8 @@ struct pbuf_s {
 	uint8_t *data;
 };
 
-struct _ts_s {
-	struct cots_ts_s public;
+struct _ss_s {
+	struct cots_ss_s public;
 
 	/* mmapped file header */
 	struct fhdr_s *mdr;
@@ -114,8 +109,10 @@ struct _ts_s {
 	/* compacted version of fields */
 	char *fields;
 
-	/* obarray for tags */
-	cots_ob_t obarray;
+	/* flags for bookkeeping and stuff */
+	struct {
+		unsigned int frozen:1;
+	};
 
 	/* row-oriented page buffer */
 	struct pbuf_s pb;
@@ -123,12 +120,13 @@ struct _ts_s {
 	/* currently attached file and its opening flags */
 	int fd;
 	int fl;
+	/* current offset for next blob */
+	off_t fo;
+	/* current offset for reading */
+	off_t ro;
 
-	struct idx_s root;
-	/* cache pointers to already mapped regions */
-	uint8_t *pidx[NTIDX];
-	/* number of indices */
-	size_t nidx;
+	/* index, if any, this will be recursive */
+	cots_idx_t idx;
 };
 
 static const char nul_layout[] = "";
@@ -191,18 +189,10 @@ msync_any(void *map, off_t off, size_t len, int flags)
 }
 
 
-static inline off_t
-_ioff(const struct _ts_s *_s)
+static inline __attribute__((pure, const)) size_t
+min_z(size_t x, size_t y)
 {
-/* calculate index offset, that's header size + blob size + alignment */
-	return ALGN16(_s->root.z[_s->nidx]);
-}
-
-static inline size_t
-_ilen(const struct _ts_s *_s)
-{
-/* calculate index length */
-	return (_s->nidx + 1U) * (sizeof(*_s->root.t) + sizeof(*_s->root.z));
+	return x < y ? x : y;
 }
 
 static size_t
@@ -228,7 +218,9 @@ _algn_zrow(const char *layout, size_t nflds)
 			inc = 4U;
 			break;
 		case COTS_LO_TIM:
+		case COTS_LO_CNT:
 		case COTS_LO_TAG:
+		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
 			/* round Z up to next 8 multiple */
@@ -253,7 +245,7 @@ _make_pbuf(size_t zrow, size_t blkz)
 static struct blob_s
 _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 {
-#define Z(zrow, nrows)	(3U * nrows * zrow / 2U)
+#define Z(zrow, nrows)	(3U * (nrows) * (zrow) / 2U)
 	struct {
 		struct cots_tsoa_s proto;
 		void *cols[nflds];
@@ -272,8 +264,8 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 	}
 
 	/* trial mmap */
-	bi = Z(sizeof(uint64_t), nrows);
-	bsz = bi + Z(pb.zrow, nrows);
+	bi = Z(pb.zrow, nrows > 64U ? nrows : 64U);
+	bsz = 2U * bi;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
@@ -314,7 +306,9 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 			break;
 		}
 		case COTS_LO_TIM:
+		case COTS_LO_CNT:
 		case COTS_LO_TAG:
+		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols.cols[i];
@@ -353,125 +347,52 @@ mun_out:
 #undef Z
 }
 
-static int
-_add_blob(struct _ts_s *_s, struct blob_s b)
+static void
+_free_blob(struct blob_s b)
 {
-	if (_s->fd >= 0) {
-		/* backing file present */
-		off_t beg = _s->root.z[_s->nidx];
-		uint8_t *m;
-
-		if (UNLIKELY(ftruncate(_s->fd, beg + b.z) < 0)) {
-			/* FUCCCK, we might as well hang ourself */
-			return -1;
-		}
-		/* mmap the blob in the file */
-		m = mmap_any(_s->fd, PROT_WRITE, MAP_SHARED, beg, b.z);
-		if (UNLIKELY(m == MAP_FAILED)) {
-			/* this is a fucking disaster */
-			return -1;
-		}
-		/* simple copy it is now, yay */
-		memcpy(m, b.data, b.z);
-		/* make sure it's on disk, aye */
-		(void)msync_any(m, beg, b.z, MS_ASYNC);
-		/* write-protect this guy and swap blobs */
-		(void)mprot_any(m, beg, b.z, PROT_READ);
-		/* unmap the old map */
-		munmap(b.data, b.z);
-		/* and swap blob data */
-		b.data = m;
-	}
-
-	/* store in index */
-	_s->root.t[_s->nidx + 0U] = b.from;
-	/* best effort to guess the next index's timestamp */
-	_s->root.t[_s->nidx + 1U] = b.till;
-	/* store offsets, cumsum of sizes */
-	_s->root.z[_s->nidx + 1U] = _s->root.z[_s->nidx + 0U] + b.z;
-	/* store pointer */
-	_s->pidx[_s->nidx + 0U] = b.data;
-	/* advance number of indices */
-	_s->nidx++;
-	return 0;
+	munmap_any(b.data, 0U, b.z);
+	return;
 }
 
-static int
-_add_idxs(struct _ts_s *_s)
-{
-	const size_t nidx = _s->nidx;
-	off_t beg;
-	off_t end;
-	uint64_t *m;
-
-	if (_s->fd < 0) {
-		return 0;
-	}
-
-	/* otherwise the backing file present */
-	beg = _ioff(_s);
-	end = beg + _ilen(_s);
-	if (UNLIKELY(ftruncate(_s->fd, end) < 0)) {
-		/* FUCCCK, we might as well hang ourself */
-		return -1;
-	}
-	/* mmap the blob in the file */
-	m = mmap_any(_s->fd, PROT_WRITE, MAP_SHARED, beg, end - beg);
-	if (UNLIKELY(m == MAP_FAILED)) {
-		/* this is a fucking disaster */
-		return -1;
-	}
-	/* bang stamps, then sizes, big-endian */
-	for (size_t i = 0U; i <= nidx; i++) {
-		m[i] = htobe64(_s->root.t[i]);
-	}
-	for (size_t i = 0U; i <= nidx; i++) {
-		m[nidx + 1U + i] = htobe64(_s->root.z[i]);
-	}
-	/* make sure it's on disk, aye */
-	(void)msync_any(m, beg, end - beg, MS_ASYNC);
-	/* unmap him right away */
-	munmap(m, end - beg);
-	return 0;
-}
-
-static int
-_flush_hdr(const struct _ts_s *_s)
+static inline __attribute__((const)) size_t
+_hdrz(const struct _ss_s *_s)
 {
 	const size_t nflds = _s->public.nfields;
-	const size_t blkz = _s->public.blockz;
+	return sizeof(*_s->mdr) + nflds + 1U;
+}
 
-	if (UNLIKELY(_s->fd < 0)) {
-		/* no need */
-		return 0;
-	} else if (UNLIKELY(_s->mdr == NULL)) {
+
+/* file fiddling */
+static int
+_updt_hdr(const struct _ss_s *_s, size_t metaz)
+{
+	if (UNLIKELY(_s->mdr == NULL)) {
 		/* great */
 		return 0;
 	}
-	/* keep track of block size */
-	with (unsigned int lgbz = __builtin_ctz(blkz) - 9U) {
-		_s->mdr->flags = htobe64(lgbz & 0xfU);
-	}
-	/* otherwise */
-	with (off_t ioff = _ioff(_s)) {
-		_s->mdr->ioff = htobe64(_ioff(_s));
-		_s->mdr->ooff = htobe64(ioff + _ilen(_s));
-	}
-	msync_any(_s->mdr, 0U, sizeof(*_s->mdr) + nflds + 1U, MS_ASYNC);
+	_s->mdr->moff = htobe64(_s->fo);
+	_s->mdr->noff = htobe64(_s->fo + metaz);
+	msync_any(_s->mdr, 0U, _hdrz(_s), MS_ASYNC);
 	return 0;
 }
 
 static int
-_flush(struct _ts_s *_s)
+_flush(struct _ss_s *_s)
 {
 /* compact WAL and write contents to backing file */
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
 	struct blob_s b;
+	size_t metaz = 0U;
+	int rc = 0;
 
 	if (UNLIKELY(!_s->pb.rowi)) {
 		return 0;
+	} else if (UNLIKELY(_s->fd < 0)) {
+		rc = -1;
+		goto rst_out;
 	}
+
 	/* get ourselves a blob first */
 	b = _make_blob(layo, nflds, _s->pb);
 
@@ -484,65 +405,111 @@ _flush(struct _ts_s *_s)
 	fprintf(stderr, "comp %zu  (%0.2f%%)\n", b.z, 100. * (double)b.z / (double)uncomp);
 
 	/* manifest blob in file */
-	_add_blob(_s, b);
+	(void)lseek(_s->fd, _s->fo, SEEK_SET);
+	/* simply write stuff */
+	for (ssize_t nwr, rem = b.z; rem > 0; rem -= nwr) {
+		nwr = write(_s->fd, b.data + (b.z - rem), rem);
 
-	/* write out indices */
-	_add_idxs(_s);
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			(void)ftruncate(_s->fd, _s->fo);
+			rc = -1;
+			goto fre_out;
+		}
+	}
+	/* add to index */
+	if (_s->idx) {
+		cots_add_index(
+			_s->idx,
+			(struct trng_s){b.from, b.till},
+			(struct orng_s){_s->fo, _s->fo + b.z},
+			_s->pb.rowi);
+	}
+
+	/* advance file offset and celebrate */
+	_s->fo += b.z;
+
+	/* put stuff like field names, obarray, etc. into the meta section
+	 * this will not update the FO */
+	if (_s->fields) {
+		const char *_1st = _s->public.fields[0U];
+		const char *last = _s->public.fields[nflds - 1U];
+
+		metaz = last - _1st + strlen(last) + 1U;
+	}
+	/* manifest in file */
+	if (metaz) {
+		ssize_t nwr = write(_s->fd, (_s->fields ?: nul_layout), metaz);
+
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			(void)ftruncate(_s->fd, _s->fo);
+			rc = -1;
+			goto fre_out;
+		}
+	}
 
 	/* update header */
-	_flush_hdr(_s);
+	_updt_hdr(_s, metaz);
 
+fre_out:
+	_free_blob(b);
+rst_out:
 	_s->pb.rowi = 0U;
+	return rc;
+}
+
+static ssize_t
+_cat(struct _ss_s *restrict _s, const struct cots_ss_s *src)
+{
+/* sendfile(3) disk data from SRC to _S */
+	const struct _ss_s *_src = (const void*)src;
+	struct stat st;
+	ssize_t fz;
+	off_t so = 0;
+
+	if (UNLIKELY(_src->fd < 0)) {
+		/* bollocks */
+		return -1;
+	} else if (UNLIKELY(fstat(_s->fd, &st) < 0)) {
+		/* interesting */
+		return -1;
+	} else if (UNLIKELY((fz = st.st_size) < 0)) {
+		/* right, what are we, a freak show? */
+		return -1;
+	} else if (UNLIKELY(fstat(_src->fd, &st) < 0)) {
+		/* no work today? i'm going home */
+		return -1;
+	}
+
+	while (so < st.st_size) {
+		ssize_t nsf = sendfile(_s->fd, _src->fd, &so, st.st_size - so);
+
+		if (UNLIKELY(nsf <= 0)) {
+			goto tru_out;
+		}
+	}
+	return so;
+
+tru_out:
+	/* we can't do with failures, better reset this thing */
+	(void)ftruncate(_s->fd, fz);
 	return -1;
 }
 
-static int
-_rd_idx(struct _ts_s *_s)
-{
-	off_t ioff;
-	off_t ooff;
-	uint64_t *m;
-	size_t nidx;
-
-	if (UNLIKELY(_s->fd < 0)) {
-		/* read whence? */
-		return -1;
-	}
-
-	/* poke the header to tell us them numbers */
-	ioff = be64toh(_s->mdr->ioff);
-	ooff = be64toh(_s->mdr->ooff);
-
-	/* map that */
-	m = mmap_any(_s->fd, PROT_READ, MAP_PRIVATE, ioff, ooff - ioff);
-	if (UNLIKELY(m == NULL)) {
-		return -1;
-	}
-	/* determine nidx */
-	nidx = (ooff - ioff) / (sizeof(*_s->root.t) + sizeof(*_s->root.z)) - 1U;
-
-	/* copy stuff to our index structure */
-	for (size_t i = 0U; i <= nidx; i++) {
-		_s->root.t[i] = be64toh(m[i]);
-	}
-	for (size_t i = 0U; i <= nidx; i++) {
-		_s->root.z[i] = be64toh(m[nidx + 1U + i]);
-	}
-	/* good effort */
-	munmap_any(m, ioff, ooff - ioff);
-	/* lest we forget about nidx */
-	_s->nidx = nidx;
-	return 0;
-}
-
 
-/* public API */
-cots_ts_t
-make_cots_ts(const char *layout, size_t blockz)
+/* public series storage API */
+cots_ss_t
+make_cots_ss(const char *layout, size_t blockz)
 {
-	struct _ts_s *res = calloc(1, sizeof(*res));
+	struct _ss_s *res;
 	size_t laylen;
 	size_t zrow;
+
+	if (UNLIKELY((res = calloc(1U, sizeof(*res))) == NULL)) {
+		/* nothing we can do, is there */
+		return NULL;
+	}
 
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
@@ -566,44 +533,39 @@ make_cots_ts(const char *layout, size_t blockz)
 		memcpy(bzp, &blockz, sizeof(blockz));
 	}
 
-	res->obarray = make_cots_ob();
-
 	/* make a page buffer (WAL) */
 	res->pb = _make_pbuf(zrow, blockz);
 
 	/* use a backing file? */
 	res->fd = -1;
 
-	return (cots_ts_t)res;
+	return (cots_ss_t)res;
 }
 
 void
-free_cots_ts(cots_ts_t ts)
+free_cots_ss(cots_ss_t ss)
 {
-	struct _ts_s *_ts = (void*)ts;
+	struct _ss_s *_ss = (void*)ss;
 
-	cots_detach(ts);
-	if (LIKELY(_ts->public.layout != nul_layout)) {
-		free(deconst(_ts->public.layout));
+	cots_detach(ss);
+	if (LIKELY(_ss->public.layout != nul_layout)) {
+		free(deconst(_ss->public.layout));
 	}
-	if (_ts->public.fields != NULL) {
-		free(deconst(_ts->public.fields));
-		free(_ts->fields);
+	if (_ss->public.fields != NULL) {
+		free(deconst(_ss->public.fields));
+		free(_ss->fields);
 	}
-	if (LIKELY(_ts->pb.data != NULL)) {
-		free(_ts->pb.data);
+	if (LIKELY(_ss->pb.data != NULL)) {
+		free(_ss->pb.data);
 	}
-	if (LIKELY(_ts->obarray != NULL)) {
-		free_cots_ob(_ts->obarray);
-	}
-	free(_ts);
+	free(_ss);
 	return;
 }
 
-cots_ts_t
-cots_open_ts(const char *file, int flags)
+cots_ss_t
+cots_open_ss(const char *file, int flags)
 {
-	struct _ts_s *res;
+	struct _ss_s *res;
 	struct fhdr_s hdr;
 	struct stat st;
 	size_t nflds;
@@ -639,7 +601,6 @@ cots_open_ts(const char *file, int flags)
 		blkz = 1UL << ((fl & 0xfU) + 9U);
 	}
 	/* make backing file known */
-	res->fd = fd;
 	res->public.filename = strdup(file);
 	{
 		size_t zlay = 8U, olay = 0U;
@@ -672,19 +633,23 @@ cots_open_ts(const char *file, int flags)
 	}
 
 	/* get some scratch space for this one */
-	res->pb = _make_pbuf(zrow, blkz);
-	/* map the header for reference */
-	with (off_t hz = sizeof(*res->mdr) + nflds + 1U) {
-		res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
-		if (UNLIKELY(res->mdr == NULL)) {
-			goto fre_out;
-		}
+	if (flags) {
+		res->pb = _make_pbuf(zrow, blkz);
 	}
-	/* now read them indices */
-	_rd_idx(res);
+	/* map the header for reference */
+	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
+	if (UNLIKELY(res->mdr == NULL)) {
+		goto fre_out;
+	}
+
+	/* collect details about this backing file */
+	res->fd = fd;
+	res->fl = flags;
+	res->fo = be64toh(res->mdr->moff) ?: st.st_size;
+	res->ro = _hdrz(res);
 
 	/* use a backing file */
-	return (cots_ts_t)res;
+	return (cots_ss_t)res;
 
 fre_out:
 	free(deconst(res->public.filename));
@@ -698,16 +663,16 @@ clo_out:
 }
 
 int
-cots_close_ts(cots_ts_t s)
+cots_close_ss(cots_ss_t s)
 {
 	cots_detach(s);
-	free_cots_ts(s);
+	free_cots_ss(s);
 	return 0;
 }
 
 
 int
-cots_attach(cots_ts_t s, const char *file, int flags)
+cots_attach(cots_ss_t s, const char *file, int flags)
 {
 /* we've got the following cases
  *    S has data   S has file   FILE has data
@@ -732,7 +697,9 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 
 	if (LIKELY(!st.st_size)) {
 		/* new file, yay, truncate to accomodate header */
-		off_t hz = sizeof(*mdr) + s->nfields + 1U;
+		off_t hz = _hdrz((struct _ss_s*)s);
+		/* calculate blocksize for header */
+		unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
 
 		if (UNLIKELY(ftruncate(fd, hz) < 0)) {
 			goto clo_out;
@@ -744,20 +711,14 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		}
 		/* bang a basic header out */
 		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
+			/* keep track of block size */
+			proto.flags = htobe64(lgbz & 0xfU);
+
 			memcpy(mdr, &proto, sizeof(*mdr));
 			memcpy(mdr->layout, s->layout, s->nfields + 1U);
 		}
-		with (struct _ts_s *_s = (void*)s) {
-			/* adjust index offsets, cases 1, 5 */
-			if (_s->fd >= 0) {
-				/* assume the old attachment has the
-				 * fixup already, cases 3, 7 */
-				break;
-			}
-			for (size_t i = 0U; i <= _s->nidx; i++) {
-				_s->root.z[i] += hz;
-			}
-		}
+		/* fiddle with the stat */
+		st.st_size = hz;
 
 	} else if (st.st_size < (ssize_t)sizeof(*mdr)) {
 		/* can't be right */
@@ -765,7 +726,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 
 	} else {
 		/* read file's header */
-		off_t hz = sizeof(*mdr) + s->nfields + 1U;
+		const off_t hz = _hdrz((struct _ss_s*)s);
 
 		mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, hz);
 		if (UNLIKELY(mdr == NULL)) {
@@ -784,17 +745,20 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 	cots_detach(s);
 
 	/* attach this one */
-	with (struct _ts_s *_s = (void*)s) {
+	with (struct _ss_s *_s = (void*)s) {
 		/* the header as mapped */
 		_s->mdr = mdr;
 		_s->public.filename = strdup(file);
 		_s->fd = fd;
 		_s->fl = flags;
+		/* store current index offs or file size as blob offs */
+		_s->fo = be64toh(mdr->moff) ?: st.st_size;
+		_s->ro = _hdrz(_s);
 	}
 	return 0;
 
 unm_out:
-	munmap_any(mdr, 0, sizeof(*mdr) + s->nfields + 1U);
+	munmap_any(mdr, 0, _hdrz((struct _ss_s*)s));
 clo_out:
 	save_errno {
 		close(fd);
@@ -803,59 +767,222 @@ clo_out:
 }
 
 int
-cots_detach(cots_ts_t s)
+cots_detach(cots_ss_t s)
 {
-	struct _ts_s *_s = (void*)s;
+/* this is the authority in closing,
+ * both free_cots_ss() and cots_close_ss() will unconditionally call this. */
+	struct _ss_s *_s = (void*)s;
 
-	if (_s->fd >= 0) {
-		if (UNLIKELY(_s->pb.rowi)) {
-			_flush(_s);
-		}
-		/* munmap blobs */
-		for (size_t i = 0U; i < _s->nidx; i++) {
-			if (_s->pidx[i] != NULL) {
-				const off_t off = _s->root.z[i];
-				const size_t len = _s->root.z[i + 1U] - off;
-				munmap_any(_s->pidx[i], off, len);
-				_s->pidx[i] = NULL;
-			}
-		}
-		/* reset indices */
-		_s->nidx = 0U;
-		_s->root.t[0U] = 0U;
-		_s->root.z[0U] = 0U;
+	cots_freeze(s);
+
+	if (_s->idx) {
+		/* assume index has been dealt with in _freeze() */
+		free_cots_idx(_s->idx);
 	}
-
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
 		_s->public.filename = NULL;
 	}
 	if (_s->mdr) {
-		const size_t hz = sizeof(*_s->mdr) + _s->public.nfields + 1U;
-		munmap_any(_s->mdr, 0, hz);
+		munmap_any(_s->mdr, 0, _hdrz(_s));
 		_s->mdr = NULL;
 	}
 	if (_s->fd >= 0) {
 		close(_s->fd);
 		_s->fd = -1;
 		_s->fl = 0;
+		_s->fo = 0;
+		_s->ro = 0;
 	}
 	return 0;
 }
 
-
-cots_tag_t
-cots_tag(cots_ts_t s, const char *str, size_t len)
+int
+cots_freeze(cots_ss_t s)
 {
-	struct _ts_s *_s = (void*)s;
-	return cots_intern(_s->obarray, str, len);
+	struct _ss_s *_s = (void*)s;
+	int rc;
+
+	if (UNLIKELY(_s->fd < 0)) {
+		/* not on my watch */
+		return -1;
+	} else if (_s->frozen) {
+		return 0;
+	}
+
+	/* flush wal to file */
+	rc = _flush(_s);
+	/* set frozen flag */
+	_s->frozen = 1U;
+
+	if (_s->idx) {
+		/* this is bad coupling:
+		 * we know _s->idx is in fact a normal _ss_s object
+		 * just freeze things here,
+		 * then use its fd and sendfile(3) to append index */
+		cots_freeze(_s->idx);
+		_cat(_s, _s->idx);
+	}
+	return rc;
 }
 
 
 int
-cots_put_fields(cots_ts_t s, const char **fields)
+cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
 {
-	struct _ts_s *_s = (void*)s;
+	struct _ss_s *_s = (void*)s;
+
+	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
+	return 0;
+}
+
+int
+cots_keep_last(cots_ss_t s)
+{
+	struct _ss_s *_s = (void*)s;
+	const size_t blkz = _s->public.blockz;
+	int rc = 0;
+
+	if (UNLIKELY(++_s->pb.rowi == blkz)) {
+		/* just for now */
+		if (!_s->idx) {
+			_s->idx = make_cots_idx(_s->public.filename);
+		}
+		/* auto-eviction */
+		rc = _flush(_s);
+	}
+	return rc;
+}
+
+
+int
+cots_write_tick(cots_ss_t s, const struct cots_tick_s *data)
+{
+	int rc = 0;
+
+	rc += cots_bang_tick(s, data);
+	rc += cots_keep_last(s);
+	return rc;
+}
+
+int
+cots_write_va(cots_ss_t s, cots_to_t t, ...)
+{
+	struct _ss_s *_s = (void*)s;
+	const char *flds = _s->public.layout;
+	uint8_t rp[_s->pb.zrow] __attribute__((aligned(16)));
+	va_list vap;
+
+	with (cots_to_t *tp = (void*)rp) {
+		*tp = t;
+	}
+	va_start(vap, t);
+	for (size_t i = 0U, n = _s->public.nfields; i < n; i++) {
+		/* next one is a bit of a Schlemiel, we could technically
+		 * iteratively compute A, much like _algn_zrow() does it,
+		 * but this way it saves us some explaining */
+		const size_t a = _algn_zrow(flds, i);
+
+		switch (_s->public.layout[i]) {
+		case COTS_LO_PRC:
+		case COTS_LO_FLT: {
+			uint32_t *cp = (uint32_t*)(rp + a);
+			*cp = va_arg(vap, uint32_t);
+			break;
+		}
+		case COTS_LO_TIM:
+		case COTS_LO_CNT:
+		case COTS_LO_TAG:
+		case COTS_LO_SIZ:
+		case COTS_LO_QTY:
+		case COTS_LO_DBL: {
+			uint64_t *cp = (uint64_t*)(rp + a);
+			*cp = va_arg(vap, uint64_t);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	va_end(vap);
+
+	return cots_write_tick(s, (const void*)rp);
+}
+
+int
+cots_init_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
+{
+	const size_t blkz = s->blockz;
+	const size_t nflds = s->nfields;
+	struct pbuf_s rb = _make_pbuf(sizeof(uint64_t) * (nflds + 1U), blkz);
+
+	if (UNLIKELY((tgt->toffs = (cots_to_t*)rb.data) == NULL)) {
+		return -1;
+	}
+	for (size_t i = 0U; i < nflds; i++) {
+		tgt->cols[i] = tgt->toffs + (i + 1U) * blkz;
+	}
+	return 0;
+}
+
+int
+cots_fini_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t UNUSED(s))
+{
+	if (UNLIKELY(tgt->toffs == NULL)) {
+		return -1;
+	}
+	free(tgt->toffs);
+	return 0;
+}
+
+ssize_t
+cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
+{
+/* currently this is mmap only */
+	struct _ss_s *_s = (void*)s;
+	const size_t blkz = _s->public.blockz;
+	const size_t nflds = _s->public.nfields;
+	const char *layo = _s->public.layout;
+	size_t nt = 0U;
+	size_t mz;
+	uint8_t *mp;
+	size_t rz;
+
+	if (UNLIKELY(_s->ro >= _s->fo)) {
+		/* no recently added ticks, innit? */
+		return 0;
+	} else if (UNLIKELY(_s->fd < 0)) {
+		/* not backing file */
+		return -1;
+	}
+
+	/* guesstimate the page that needs mapping */
+	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
+	mp = mmap_any(_s->fd, PROT_READ, MAP_SHARED, _s->ro, mz);
+	if (UNLIKELY(mp == NULL)) {
+		return -1;
+	}
+
+	/* quickly inspect integrity, well update RO more importantly */
+	memcpy(&rz, mp, sizeof(rz));
+
+	/* decompress */
+	nt = dcmp(tgt, nflds, layo, mp + sizeof(rz), rz);
+
+	/* unmap */
+	munmap_any(mp, _s->ro, mz);
+
+	/* advance iterator */
+	_s->ro += rz + sizeof(rz);
+	return nt;
+}
+
+
+/* meta stuff */
+int
+cots_put_fields(cots_ss_t s, const char **fields)
+{
+	struct _ss_s *_s = (void*)s;
 	const size_t nfields = _s->public.nfields;
 	const char *const *old = _s->public.fields;
 	const char **new = calloc(nfields + 1U, sizeof(*new));
@@ -899,119 +1026,6 @@ cots_put_fields(cots_ts_t s, const char **fields)
 	}
 	_s->fields = flds;
 	return 0;
-}
-
-
-int
-cots_write_va(cots_ts_t s, cots_to_t t, ...)
-{
-	struct _ts_s *_s = (void*)s;
-	const char *flds = _s->public.layout;
-	uint8_t *rp = _s->pb.data + _s->pb.rowi * _s->pb.zrow;
-	va_list vap;
-
-	with (cots_to_t *tp = (void*)rp) {
-		*tp = t;
-	}
-	va_start(vap, t);
-	for (size_t i = 0U, n = _s->public.nfields; i < n; i++) {
-		/* next one is a bit of a Schlemiel, we could technically
-		 * iteratively compute A, much like _algn_zrow() does it,
-		 * but this way it saves us some explaining */
-		const size_t a = _algn_zrow(flds, i);
-
-		switch (_s->public.layout[i]) {
-		case COTS_LO_PRC:
-		case COTS_LO_FLT: {
-			uint32_t *cp = (uint32_t*)(rp + a);
-			*cp = va_arg(vap, uint32_t);
-			break;
-		}
-		case COTS_LO_TIM:
-		case COTS_LO_TAG:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL: {
-			uint64_t *cp = (uint64_t*)(rp + a);
-			*cp = va_arg(vap, uint64_t);
-			break;
-		}
-		default:
-			break;
-		}
-	}
-	va_end(vap);
-
-	if (UNLIKELY(++_s->pb.rowi == _s->public.blockz)) {
-		/* auto-eviction */
-		_flush(_s);
-	}
-	return 0;
-}
-
-int
-cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
-{
-	struct _ts_s *_s = (void*)s;
-	const size_t blkz = _s->public.blockz;
-
-	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
-
-	if (UNLIKELY(++_s->pb.rowi == blkz)) {
-		/* auto-eviction */
-		_flush(_s);
-	}
-	return 0;
-}
-
-ssize_t
-cots_read_ticks(struct cots_tsoa_s *tsoa, cots_ts_t s)
-{
-	struct _ts_s *_s = (void*)s;
-	const size_t nflds = _s->public.nfields;
-	const size_t blkz = _s->public.blockz;
-	const char *layo = _s->public.layout;
-	size_t n = 0U;
-	size_t z;
-	off_t poff;
-	off_t eoff;
-	uint8_t *m;
-	size_t mi = 0U;
-
-	/* we need a cursor type! */
-	;
-
-	/* find offset of page and length */
-	poff = _s->root.z[0U];
-	eoff = _s->root.z[1U];
-
-	if (UNLIKELY(eoff <= poff)) {
-		return -1;
-	}
-	/* otherwise map */
-	m = mmap_any(_s->fd, PROT_READ, MAP_SHARED, poff, eoff - poff);
-	if (UNLIKELY(m == NULL)) {
-		return -1;
-	}
-
-	/* quickly inspect integrity */
-	memcpy(&z, m, sizeof(z));
-	mi += sizeof(z);
-	if (UNLIKELY(z != eoff - poff - sizeof(z))) {
-		goto mun_out;
-	}
-
-	/* setup result soa */
-	tsoa->toffs = (cots_to_t*)_s->pb.data;
-	for (size_t i = 0U; i < nflds; i++) {
-		tsoa->cols[i] = tsoa->toffs + (i + 1U) * blkz;
-	}
-
-	/* decompress */
-	n = dcmp(tsoa, nflds, layo, m + mi, z);
-
-mun_out:
-	munmap_any(m, poff, z);
-	return n;
 }
 
 /* cotse.c ends here */
