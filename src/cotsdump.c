@@ -56,6 +56,9 @@ struct samp_s {
 	cots_qx_t *q;
 };
 
+static char *line;
+static size_t llen;
+
 
 static __attribute__((format(printf, 1, 2))) void
 serror(const char *fmt, ...)
@@ -77,48 +80,63 @@ static void
 dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 {
 	for (size_t i = 0U; i < n; i++) {
-		with (cots_to_t t = cols->toffs[i]) {
-			fprintf(stdout, "%lu.%09lu",
-				t / 1000000000U, t % 1000000000U);
-		}
-		for (size_t j = 0U; j < hdl->nfields; j++) {
-			char buf[64U];
+		char *lp = line;
+#define lz	(size_t)(line + llen - lp)
+		cots_to_t t = cols->toffs[i];
 
+		goto ini_tim;
+
+		for (size_t j = 0U; j < hdl->nfields; j++) {
+			if (UNLIKELY(lz < llen / 4U)) {
+				/* not enough breathing space */
+				line = realloc(line, llen *= 2U);
+			}
 			switch (hdl->layout[j]) {
 			case COTS_LO_PRC: {
 				cots_px_t *pp = cols->cols[j];
-				d32tostr(buf, sizeof(buf), pp[i]);
-				fputc('\t', stdout);
-				fputs(buf, stdout);
+
+				*lp++ = '\t';
+				lp += d32tostr(lp, lz, pp[i]);
 				break;
 			}
 			case COTS_LO_QTY: {
 				cots_qx_t *qp = cols->cols[j];
-				d64tostr(buf, sizeof(buf), qp[i]);
-				fputc('\t', stdout);
-				fputs(buf, stdout);
+
+				*lp++ = '\t';
+				lp += d64tostr(lp, lz, qp[i]);
 				break;
 			}
 			case COTS_LO_TIM: {
 				cots_to_t *tp = cols->cols[j];
-				cots_to_t t = tp[i];
-				fprintf(stdout, "\t%lu.%09lu",
-					t % 1000000000U, t % 1000000000U);
+
+				t = tp[i];
+				*lp++ = '\t';
+
+			ini_tim:
+				lp += snprintf(
+					lp, lz, "%lu.%09lu",
+					t / 1000000000U, t % 1000000000U);
 				break;
 			}
 			case COTS_LO_CNT:
 			case COTS_LO_TAG:
 			case COTS_LO_SIZ: {
 				uint64_t *zp = cols->cols[j];
-				fprintf(stdout, "\t%lu", zp[i]);
+
+				*lp++ = '\t';
+				lp += snprintf(lp, lz, "%lu", zp[i]);
 				break;
 			}
 			default:
-				fputs("\tUNK", stdout);
+				*lp++ = '\t';
+				*lp++ = 'U';
+				*lp++ = 'N';
+				*lp++ = 'K';
 				break;
 			}
 		}
-		fputc('\n', stdout);
+		*lp++ = '\n';
+		fwrite(line, 1U, lp - line, stdout);
 	}
 	return;
 }
@@ -128,6 +146,12 @@ int
 main(int argc, char *argv[])
 {
 	int rc = 0;
+
+	/* get some line buffer */
+	if ((line = malloc(llen = 256U)) == NULL) {
+		/* don't even start */
+		return 1;
+	}
 
 	for (int i = 1; i < argc; i++) {
 		cots_ss_t hdl;
@@ -151,6 +175,7 @@ main(int argc, char *argv[])
 		}
 		cots_close_ss(hdl);
 	}
+	free(line);
 	return rc;
 }
 
