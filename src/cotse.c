@@ -237,14 +237,14 @@ _algn_zrow(const char *layout, size_t nflds)
 	return z;
 }
 
-static struct pbuf_s
+static inline struct pbuf_s
 _make_pbuf(size_t zrow, size_t blkz)
 {
 	void *data = calloc(blkz, zrow);
 	return (struct pbuf_s){zrow, 0U, data};
 }
 
-static void
+static inline void
 _free_pbuf(struct pbuf_s pb)
 {
 	if (LIKELY(pb.data != NULL)) {
