@@ -96,14 +96,18 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 				cots_px_t *pp = cols->cols[j];
 
 				*lp++ = '\t';
-				lp += d32tostr(lp, lz, pp[i]);
+				if (LIKELY(pp[i] != COTS_PX_MISS.d32)) {
+					lp += d32tostr(lp, lz, pp[i]);
+				}
 				break;
 			}
 			case COTS_LO_QTY: {
 				cots_qx_t *qp = cols->cols[j];
 
 				*lp++ = '\t';
-				lp += d64tostr(lp, lz, qp[i]);
+				if (LIKELY(qp[i] != COTS_QX_MISS.d64)) {
+					lp += d64tostr(lp, lz, qp[i]);
+				}
 				break;
 			}
 			case COTS_LO_TIM: {
