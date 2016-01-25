@@ -214,7 +214,10 @@ free_cots_ob(cots_ob_t ob)
 cots_tag_t
 cots_intern(cots_ob_t ob, const char *str, size_t len)
 {
-	if (UNLIKELY(!len)) {
+	if (UNLIKELY(ob == NULL)) {
+		/* oh nice one, user */
+		return 0U;
+	} else if (UNLIKELY(!len)) {
 		/* don't bother */
 		return 0U;
 	}

@@ -127,6 +127,9 @@ struct _ss_s {
 
 	/* index, if any, this will be recursive */
 	cots_idx_t idx;
+
+	/* obarray */
+	cots_ob_t ob;
 };
 
 static const char nul_layout[] = "";
@@ -563,6 +566,10 @@ make_cots_ss(const char *layout, size_t blockz)
 	/* use a backing file? */
 	res->fd = -1;
 
+	/* create an obarray if there's strings */
+	if (strchr(res->public.layout, COTS_LO_STR)) {
+		res->ob = make_cots_ob();
+	}
 	return (cots_ss_t)res;
 }
 
@@ -580,6 +587,9 @@ free_cots_ss(cots_ss_t ss)
 		free(_ss->fields);
 	}
 	_free_pbuf(_ss->pb);
+	if (_ss->ob != NULL) {
+		free_cots_ob(_ss->ob);
+	}
 	free(_ss);
 	return;
 }
@@ -1051,6 +1061,13 @@ cots_put_fields(cots_ss_t s, const char **fields)
 	}
 	_s->fields = flds;
 	return 0;
+}
+
+cots_tag_t
+cots_tag(cots_ss_t s, const char *str, size_t len)
+{
+	struct _ss_s *_s = (void*)s;
+	return cots_intern(_s->ob, str, len);
 }
 
 /* cotse.c ends here */
