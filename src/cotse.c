@@ -91,6 +91,13 @@ struct blob_s {
 	cots_to_t till;
 };
 
+/* meta chunks */
+struct chnk_s {
+	const uint8_t *data;
+	size_t z;
+	uint8_t type;
+};
+
 struct pbuf_s {
 	/* size of one row with alignment */
 	size_t zrow;
@@ -389,18 +396,42 @@ _last_toff(const struct _ss_s *_s)
 }
 
 static ssize_t
-_wr_meta_chnk(int fd, uint8_t type, const uint8_t *data, size_t len)
+_wr_meta_chnk(int fd, struct chnk_s chnk)
 {
 /* write a chunk of meta data */
-	uint64_t tz = (len << 8U) ^ (type);
+	uint64_t tz = (chnk.z << 8U) ^ (chnk.type);
 	ssize_t nwr = 0;
 
 	/* big-endianify */
 	tz = htobe64(tz);
 	/* write tz, then data */
 	nwr += write(fd, &tz, sizeof(tz));
-	nwr += write(fd, data, len);
-	return nwr == len + sizeof(tz) ? nwr : -1;
+	nwr += write(fd, chnk.data, chnk.z);
+	return (nwr == chnk.z + sizeof(tz)) ? nwr : -1;
+}
+
+static struct chnk_s
+_rd_meta_chnk(const uint8_t *chnk, size_t chnz)
+{
+	uint64_t tz;
+	size_t z;
+	uint8_t t;
+
+	if (UNLIKELY(chnz < sizeof(tz))) {
+		/* can't be */
+		return (struct chnk_s){NULL};
+	}
+	/* otherwise snarf the type-size */
+	memcpy(&tz, chnk, sizeof(tz));
+	tz = be64toh(tz);
+	t = tz & 0xffU;
+	z = tz >> 8U;
+	/* check sizes again, avoid overreading a page boundary */
+	if (UNLIKELY(sizeof(tz) + z > chnz)) {
+		return (struct chnk_s){NULL};
+	}
+	/* otherwise it's good to go */
+	return (struct chnk_s){chnk + sizeof(tz), z, t};
 }
 
 
@@ -431,7 +462,8 @@ _wr_meta(const struct _ss_s *_s)
 		ssize_t mz = last - _1st + strlen(last) + 1U;
 		ssize_t nwr;
 
-		nwr = _wr_meta_chnk(_s->fd, 'F', (uint8_t*)_s->fields, mz);
+		nwr = _wr_meta_chnk(
+			_s->fd, (struct chnk_s){(uint8_t*)_s->fields, mz, 'F'});
 
 		if (UNLIKELY(nwr < 0)) {
 			/* truncate back to old size */
@@ -445,7 +477,7 @@ _wr_meta(const struct _ss_s *_s)
 		size_t mz = wr_ob(&tgt, _s->ob);
 		ssize_t nwr;
 
-		nwr = _wr_meta_chnk(_s->fd, 'O', tgt, mz);
+		nwr = _wr_meta_chnk(_s->fd, (struct chnk_s){tgt, mz, 'O'});
 
 		if (UNLIKELY(nwr < 0)) {
 			/* truncate back to old size */
@@ -458,6 +490,32 @@ _wr_meta(const struct _ss_s *_s)
 tru_out:
 	(void)ftruncate(_s->fd, _s->fo);
 	return 0U;
+}
+
+static int
+_rd_meta(struct _ss_s *restrict _s, const uint8_t *blob, size_t bloz)
+{
+	struct chnk_s c;
+
+	for (size_t bi = 0U;
+	     bi < bloz && (c = _rd_meta_chnk(blob + bi, bloz - bi)).data;
+	     bi = c.data + c.z - blob) {
+		/* only handle chunks with known types */
+		switch (c.type) {
+		case 'F':
+			/* fields, yay */
+			break;
+
+		case 'O':
+			/* obarray, fantastic */
+			break;
+
+		default:
+			/* user rubbish */
+			break;
+		}
+	}
+	return (c.data != NULL) - 1;
 }
 
 static int
@@ -720,6 +778,27 @@ cots_open_ss(const char *file, int flags)
 	res->fl = flags;
 	res->fo = be64toh(res->mdr->moff) ?: st.st_size;
 	res->ro = _hdrz(res);
+
+	/* short dip into the meta pool */
+	with (off_t noff = be64toh(res->mdr->noff)) {
+		off_t moff = res->fo;
+		uint8_t *m;
+
+		if (moff >= noff) {
+			/* not for us this isn't */
+			break;
+		}
+		/* try mapping him */
+		m = mmap_any(fd, PROT_READ, MAP_SHARED, moff, noff - moff);
+		if (UNLIKELY(m == NULL)) {
+			/* it's no good */
+			break;
+		}
+		/* try reading him */
+		(void)_rd_meta(res, m, noff - moff);
+
+		(void)munmap_any(m, moff, noff - moff);
+	}
 
 	/* use a backing file */
 	return (cots_ss_t)res;
