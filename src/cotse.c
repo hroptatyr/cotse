@@ -349,8 +349,15 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 
 	/* call the compactor */
 	z = comp(buf + sizeof(z), nflds, nrows, flds, &cols.proto);
-	memcpy(buf, &z, sizeof(z));
-	z += sizeof(z);
+	/* store compacted size and number of rows
+	 * seeing as the maximum blocksize can be 2^24 and storing 0 rows
+	 * would not be beneficial we store nrows-1 in the first 24bits
+	 * and then the compressed size */
+	with (uint64_t zn = (z << 24U) ^ (nrows - 1U)) {
+		zn = htobe64(zn);
+		memcpy(buf, &zn, sizeof(zn));
+		z += sizeof(zn);
+	}
 
 	/* make the map a bit tinier */
 	with (uint8_t *blo = mremap(buf, bsz, z, MREMAP_MAYMOVE)) {
@@ -1128,16 +1135,26 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 	}
 
 	/* quickly inspect integrity, well update RO more importantly */
-	memcpy(&rz, mp, sizeof(rz));
+	with (uint64_t zn) {
+		size_t nrows;
 
-	/* decompress */
-	nt = dcmp(tgt, nflds, layo, mp + sizeof(rz), rz);
+		memcpy(&zn, mp, sizeof(zn));
+		zn = be64toh(zn);
+
+		nrows = (zn & 0xffffffU) + 1U;
+		rz = zn >> 24U;
+
+		/* decompress */
+		dcmp(tgt, nflds, nrows, layo, mp + sizeof(zn), rz);
+
+		rz += sizeof(zn);
+	}
 
 	/* unmap */
 	munmap_any(mp, _s->ro, mz);
 
 	/* advance iterator */
-	_s->ro += rz + sizeof(rz);
+	_s->ro += rz;
 	return nt;
 }
 
