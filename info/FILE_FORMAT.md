@@ -119,9 +119,29 @@ The layout is stored as \nul-terminated string in the layout section.
 Series data
 -----------
 
+Series data is written in chunks of *block-size* rows, i.e. *block-size*
+rows are columnised and compressed column by column, then concatenated
+and written into a single chunk on the disk.  This chunk is prefixed by
+a header that containes the number of rows and the total compressed size
+of the chunk.
+
+In this regard, cots files are actually hybrid (row-oriented *and*
+column-oriented).
+
 
 Meta
 ----
+
+The meta data section, much like the series data, is written in chunks
+prefixed with a size (56bits) and type (8bits) header, which is stored
+in big-endian format.
+
+There are no impositions on the type whatsoever, applications need to
+coordinate their types used in the meta section themselves.
+
+Currently, the cotse writer uses type `O` (hex `0x4F`) for a meta chunk
+of interned strings and type `F` (hex `0x46`) for field names.  The
+reader supports reading them back.
 
 
 Index
