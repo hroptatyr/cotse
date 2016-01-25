@@ -51,6 +51,6 @@ comp_to(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt);
 /**
  * Decompress NZ bytes in C into time offsets, return number of offsets. */
 extern size_t
-dcmp_to(cots_to_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_to(cots_to_t *restrict t, size_t nt, const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_to_h_ */

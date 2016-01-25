@@ -150,8 +150,6 @@ comp_to(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 {
 	size_t res = 0U;
 
-	memcpy(tgt, &nt, sizeof(nt));
-	res += sizeof(nt);
 	for (size_t i = 0U; i < nt; i += MAX_NT) {
 		const size_t mt = MAX_NT < nt - i ? MAX_NT : nt - i;
 
@@ -163,13 +161,9 @@ comp_to(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 
 /* decompress */
 size_t
-dcmp_to(cots_to_t *restrict tgt, const uint8_t *c, size_t nz)
+dcmp_to(cots_to_t *restrict tgt, size_t nt, const uint8_t *c, size_t nz)
 {
 	size_t ci = 0U;
-	size_t nt;
-
-	memcpy(&nt, c, sizeof(nt));
-	ci += sizeof(nt);
 
 	for (size_t i = 0U; i < nt; i += MAX_NT) {
 		const size_t mt = MAX_NT < nt - i ? MAX_NT : nt - i;
