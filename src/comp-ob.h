@@ -53,13 +53,13 @@ extern size_t
 dcmp_tag(cots_tag_t *restrict tgt, const uint8_t *restrict c, size_t nz);
 
 /**
- * Compress obarray OB into TGT, return the number of bytes. */
+ * Prepare obarray OB for serialising, return size in bytes. */
 extern size_t
-comp_ob(uint8_t *restrict tgt, const struct cots_ob_s *restrict ob);
+wr_ob(uint8_t **const tgt, const struct cots_ob_s *restrict ob);
 
 /**
- * Decompress NZ bytes in C into obarray, return obarray object. */
+ * Deserialise obarray in C of size NZ (bytes). */
 extern cots_ob_t
-dcmp_ob(const uint8_t *restrict c, size_t nz);
+rd_ob(const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_ob_h_ */

@@ -256,38 +256,25 @@ cots_tag_name(cots_ob_t ob, cots_tag_t m)
 }
 
 
-/* comp-ob API */
-/* compress */
+/* serialiser API */
 size_t
-comp_ob(uint8_t *restrict tgt, const struct cots_ob_s *restrict ob)
+wr_ob(uint8_t **const tgt, const struct cots_ob_s *restrict ob)
 {
 	const size_t off = ob->off[ob->nobs];
-	size_t res = 0U;
 
-	memcpy(tgt, &off, sizeof(off));
-	res += sizeof(off);
-
-	memcpy(tgt + res, ob->obs, off);
-	res += off;
-	return res;
+	*tgt = ob->obs;
+	return off;
 }
 
 /* decompress */
 cots_ob_t
-dcmp_ob(const uint8_t *restrict c, size_t nz)
+rd_ob(const uint8_t *restrict c, size_t nz)
 {
 	struct cots_ob_s res = {0UL}, *rp;
 	size_t ci = 0U;
-	size_t tot;
-
-	memcpy(&tot, c, sizeof(tot));
-	ci += sizeof(tot);
-	if (UNLIKELY(tot + ci > nz)) {
-		return NULL;
-	}
 
 	/* count the number of \nul's to determine NOBS */
-	for (const uint8_t *cp = c + ci, *const ep = cp + tot; cp < ep; cp++) {
+	for (const uint8_t *cp = c + ci, *const ep = cp + nz; cp < ep; cp++) {
 		if (UNLIKELY((cp = memchr(cp, '\0', ep - cp)) == NULL)) {
 			break;
 		}
@@ -344,12 +331,12 @@ dcmp_ob(const uint8_t *restrict c, size_t nz)
 	}
 
 	/* looking brill, copy the string beef */
-	res.zobs = _next_2pow(tot);
+	res.zobs = _next_2pow(nz);
 	res.obs = malloc(res.zobs);
 	if (UNLIKELY(res.obs == NULL)) {
 		goto err_obs;
 	}
-	memcpy(res.obs, c + ci, tot);
+	memcpy(res.obs, c + ci, nz);
 
 	/* and now the container */
 	rp = malloc(sizeof(res));
