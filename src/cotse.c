@@ -1114,7 +1114,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 	const size_t blkz = _s->public.blockz;
 	const size_t nflds = _s->public.nfields;
 	const char *layo = _s->public.layout;
-	size_t nt = 0U;
+	size_t nrows;
 	size_t mz;
 	uint8_t *mp;
 	size_t rz;
@@ -1136,7 +1136,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 
 	/* quickly inspect integrity, well update RO more importantly */
 	with (uint64_t zn) {
-		size_t nrows;
+		size_t ntdcmp;
 
 		memcpy(&zn, mp, sizeof(zn));
 		zn = be64toh(zn);
@@ -1145,7 +1145,10 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 		rz = zn >> 24U;
 
 		/* decompress */
-		dcmp(tgt, nflds, nrows, layo, mp + sizeof(zn), rz);
+		ntdcmp = dcmp(tgt, nflds, nrows, layo, mp + sizeof(zn), rz);
+		if (UNLIKELY(ntdcmp != nrows)) {
+			nrows = 0U;
+		}
 
 		rz += sizeof(zn);
 	}
@@ -1155,7 +1158,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 
 	/* advance iterator */
 	_s->ro += rz;
-	return nt;
+	return nrows;
 }
 
 
