@@ -88,7 +88,7 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 		}
 
 		case COTS_LO_SIZ:
-		case COTS_LO_TAG: {
+		case COTS_LO_STR: {
 			cots_tag_t *c = cols->cols[i];
 
 			z = comp_tag(tgt + totz + sizeof(z), c, nrows);
@@ -157,7 +157,7 @@ dcmp(struct cots_tsoa_s *restrict cols,
 		}
 
 		case COTS_LO_SIZ:
-		case COTS_LO_TAG: {
+		case COTS_LO_STR: {
 			cots_tag_t *c = cols->cols[i];
 
 			memcpy(&z, src + si, sizeof(z));

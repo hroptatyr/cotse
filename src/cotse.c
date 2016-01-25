@@ -219,7 +219,7 @@ _algn_zrow(const char *layout, size_t nflds)
 			break;
 		case COTS_LO_TIM:
 		case COTS_LO_CNT:
-		case COTS_LO_TAG:
+		case COTS_LO_STR:
 		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
@@ -318,7 +318,7 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 		}
 		case COTS_LO_TIM:
 		case COTS_LO_CNT:
-		case COTS_LO_TAG:
+		case COTS_LO_STR:
 		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
@@ -917,7 +917,7 @@ cots_write_va(cots_ss_t s, cots_to_t t, ...)
 		}
 		case COTS_LO_TIM:
 		case COTS_LO_CNT:
-		case COTS_LO_TAG:
+		case COTS_LO_STR:
 		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {

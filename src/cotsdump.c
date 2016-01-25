@@ -159,7 +159,7 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 				break;
 			}
 			case COTS_LO_CNT:
-			case COTS_LO_TAG:
+			case COTS_LO_STR:
 			case COTS_LO_SIZ: {
 				uint64_t *zp = cols->cols[j];
 

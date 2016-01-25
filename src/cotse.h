@@ -100,7 +100,7 @@ typedef struct cots_ss_s {
 #define COTS_LO_END	'\0'
 #define COTS_LO_BYT	'b'
 #define COTS_LO_TIM	't'
-#define COTS_LO_TAG	'm'
+#define COTS_LO_STR	's'
 #define COTS_LO_PRC	'p'
 #define COTS_LO_QTY	'q'
 #define COTS_LO_FLT	'f'
