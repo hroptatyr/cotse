@@ -203,6 +203,16 @@ main(int argc, char *argv[])
 			continue;
 		}
 
+		/* print fields */
+		if (hdl->fields) {
+			fputs("TIME", stdout);
+			for (size_t j = 0U; j < hdl->nfields; j++) {
+				fputc('\t', stdout);
+				fputs(hdl->fields[j], stdout);
+			}
+			fputc('\n', stdout);
+		}
+
 		/* use a generic tsoa */
 		with (void *_cols[hdl->nfields + 1U], *cols = (void*)_cols) {
 			cots_init_tsoa(cols, hdl);
