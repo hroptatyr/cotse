@@ -1233,4 +1233,11 @@ cots_tag(cots_ss_t s, const char *str, size_t len)
 	return cots_intern(_s->ob, str, len);
 }
 
+const char*
+cots_str(cots_ss_t s, cots_tag_t tag)
+{
+	struct _ss_s *_s = (void*)s;
+	return _s->ob ? cots_tag_name(_s->ob, tag) : NULL;
+}
+
 /* cotse.c ends here */

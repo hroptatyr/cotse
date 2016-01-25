@@ -159,6 +159,10 @@ extern int cots_close_ss(cots_ss_t);
  * Return tag representation of STR (of length LEN). */
 extern cots_tag_t cots_tag(cots_ss_t, const char *str, size_t len);
 
+/**
+ * Return the string representation of TAG in TS. */
+extern const char *cots_str(cots_ss_t, cots_tag_t);
+
 
 /**
  * Lodge field names (for documentation purposes) with TS.
