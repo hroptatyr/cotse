@@ -109,8 +109,6 @@ comp_tag(uint8_t *restrict tgt, const cots_tag_t *restrict m, size_t nm)
 {
 	size_t res = 0U;
 
-	memcpy(tgt, &nm, sizeof(nm));
-	res += sizeof(nm);
 	for (size_t i = 0U; i < nm; i += MAX_NM) {
 		const size_t mm = MAX_NM < nm - i ? MAX_NM : nm - i;
 
@@ -122,21 +120,17 @@ comp_tag(uint8_t *restrict tgt, const cots_tag_t *restrict m, size_t nm)
 
 /* decompress */
 size_t
-dcmp_tag(cots_tag_t *restrict tgt, const uint8_t *restrict c, size_t nz)
+dcmp_tag(cots_tag_t *restrict tgt, size_t nt, const uint8_t *c, size_t nz)
 {
 	size_t ci = 0U;
-	size_t nm;
 
-	memcpy(&nm, c, sizeof(nm));
-	ci += sizeof(nm);
-
-	for (size_t i = 0U; i < nm; i += MAX_NM) {
-		const size_t mm = MAX_NM < nm - i ? MAX_NM : nm - i;
+	for (size_t i = 0U; i < nt; i += MAX_NM) {
+		const size_t mt = MAX_NM < nt - i ? MAX_NM : nt - i;
 
 		/* no further filtering needed, just use pfor */
-		ci += _dcmp(tgt + i, mm, c + ci, nz - ci);
+		ci += _dcmp(tgt + i, mt, c + ci, nz - ci);
 	}
-	return nm;
+	return nt;
 }
 
 /* comp-ob.c ends here */

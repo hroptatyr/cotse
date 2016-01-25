@@ -56,13 +56,17 @@ size_t
 comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
      const struct cots_tsoa_s *cols)
 {
+	uint64_t tz;
 	size_t totz = 0U;
 	size_t z;
 
 	/* toffs first */
-	z = comp_to(tgt + totz + sizeof(z), cols->toffs, nrows);
-	memcpy(tgt + totz, &z, sizeof(z));
-	totz += z + sizeof(z);
+	z = comp_to(tgt + totz + sizeof(tz), cols->toffs, nrows);
+	/* bang type+size cell */
+	tz = (z << 8U) ^ ((uint8_t)COTS_LO_TIM);
+	tz = htobe64(tz);
+	memcpy(tgt + totz, &tz, sizeof(tz));
+	totz += z + sizeof(tz);
 
 	/* columns now */
 	for (size_t i = 0U; i < ncols; i++) {
@@ -72,8 +76,6 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 			uint32_t *c = cols->cols[i];
 
 			z = comp_px(tgt + totz + sizeof(z), c, nrows);
-			memcpy(tgt + totz, &z, sizeof(z));
-			totz += z + sizeof(z);
 			break;
 		}
 
@@ -82,8 +84,6 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 			cots_to_t *c = cols->cols[i];
 
 			z = comp_to(tgt + totz + sizeof(z), c, nrows);
-			memcpy(tgt + totz, &z, sizeof(z));
-			totz += z + sizeof(z);
 			break;
 		}
 
@@ -92,8 +92,6 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 			cots_tag_t *c = cols->cols[i];
 
 			z = comp_tag(tgt + totz + sizeof(z), c, nrows);
-			memcpy(tgt + totz, &z, sizeof(z));
-			totz += z + sizeof(z);
 			break;
 		}
 
@@ -102,34 +100,55 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 			uint64_t *c = cols->cols[i];
 
 			z = comp_qx(tgt + totz + sizeof(z), c, nrows);
-			memcpy(tgt + totz, &z, sizeof(z));
-			totz += z + sizeof(z);
 			break;
 		}
 		default:
 			break;
 		}
+		/* bang type+size cell */
+		tz = (z << 8U) ^ ((uint8_t)layout[i]);
+		tz = htobe64(tz);
+		memcpy(tgt + totz, &tz, sizeof(tz));
+		totz += z + sizeof(tz);
 	}
 	return totz;
 }
 
 size_t
 dcmp(struct cots_tsoa_s *restrict cols,
-     size_t ncols, const char *layout, const uint8_t *restrict src, size_t ssz)
+     size_t ncols, size_t nrows,
+     const char *layout, const uint8_t *restrict src, size_t ssz)
 {
+	uint64_t tz;
 	size_t si = 0U;
 	size_t nt;
 	size_t z;
 
 	/* times first */
-	memcpy(&z, src + si, sizeof(z));
-	si += sizeof(z);
-	nt = dcmp_to(cols->toffs, src + si, z);
+	memcpy(&tz, src + si, sizeof(tz));
+	si += sizeof(tz);
+	tz = be64toh(tz);
+	/* check type and size */
+	if (UNLIKELY((char)(tz & 0xffU) != COTS_LO_TIM)) {
+		return 0U;
+	} else if (UNLIKELY(si + (z = tz >> 8U) > ssz)) {
+		return 0U;
+	}
+	nt = dcmp_to(cols->toffs, nrows, src + si, z);
+	if (UNLIKELY(nt != nrows)) {
+		return 0U;
+	}
 	si += z;
 
 	/* columns now */
-	for (size_t i = 0U, ntdcmp; i < ncols; i++) {
-		if (UNLIKELY(si >= ssz)) {
+	for (size_t i = 0U; i < ncols; i++) {
+		memcpy(&tz, src + si, sizeof(tz));
+		si += sizeof(tz);
+		tz = be64toh(tz);
+		/* check type and size again */
+		if (UNLIKELY((char)(tz & 0xffU) != layout[i])) {
+			return 0U;
+		} else if (UNLIKELY(si + (z = tz >> 8U) > ssz)) {
 			return 0U;
 		}
 
@@ -138,10 +157,7 @@ dcmp(struct cots_tsoa_s *restrict cols,
 		case COTS_LO_FLT: {
 			uint32_t *c = cols->cols[i];
 
-			memcpy(&z, src + si, sizeof(z));
-			si += sizeof(z);
-			ntdcmp = dcmp_px(c, src + si, z);
-			si += z;
+			nt = dcmp_px(c, nrows, src + si, z);
 			break;
 		}
 
@@ -149,10 +165,7 @@ dcmp(struct cots_tsoa_s *restrict cols,
 		case COTS_LO_TIM: {
 			cots_to_t *c = cols->cols[i];
 
-			memcpy(&z, src + si, sizeof(z));
-			si += sizeof(z);
-			ntdcmp = dcmp_to(c, src + si, z);
-			si += z;
+			nt = dcmp_to(c, nrows, src + si, z);
 			break;
 		}
 
@@ -160,10 +173,7 @@ dcmp(struct cots_tsoa_s *restrict cols,
 		case COTS_LO_STR: {
 			cots_tag_t *c = cols->cols[i];
 
-			memcpy(&z, src + si, sizeof(z));
-			si += sizeof(z);
-			ntdcmp = dcmp_tag(c, src + si, z);
-			si += z;
+			nt = dcmp_tag(c, nrows, src + si, z);
 			break;
 		}
 
@@ -171,21 +181,19 @@ dcmp(struct cots_tsoa_s *restrict cols,
 		case COTS_LO_DBL: {
 			uint64_t *c = cols->cols[i];
 
-			memcpy(&z, src + si, sizeof(z));
-			si += sizeof(z);
-			ntdcmp = dcmp_qx(c, src + si, z);
-			si += z;
+			nt = dcmp_qx(c, nrows, src + si, z);
 			break;
 		}
 		default:
 			break;
 		}
 		/* check if all columns have the same number o ticks */
-		if (UNLIKELY(ntdcmp != nt)) {
+		if (UNLIKELY(nt != nrows)) {
 			return 0U;
 		}
+		si += z;
 	}
-	return nt;
+	return nrows;
 }
 
 /* comp.c ends here */

@@ -46,6 +46,7 @@ comp(uint8_t *restrict tgt, size_t ncols, size_t nrows, const char *layout,
 
 extern size_t
 dcmp(struct cots_tsoa_s *restrict cols,
-     size_t ncols, const char *layout, const uint8_t *restrict src, size_t ssz);
+     size_t ncols, size_t nrows,
+     const char *layout, const uint8_t *restrict src, size_t ssz);
 
 #endif	/* INCLUDED_comp_h_ */

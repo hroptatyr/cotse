@@ -50,6 +50,6 @@ comp_tag(uint8_t *restrict tgt, const cots_tag_t *restrict m, size_t nm);
 /**
  * Decompress NZ bytes in C into metric codes, return number of codes. */
 extern size_t
-dcmp_tag(cots_tag_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_tag(cots_tag_t *restrict, size_t nt, const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_ob_h_ */

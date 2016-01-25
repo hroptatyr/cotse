@@ -50,6 +50,6 @@ comp_qx(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np);
 /**
  * Decompress NZ bytes in C into price values, return number of prices. */
 extern size_t
-dcmp_qx(uint64_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_qx(uint64_t *restrict t, size_t nt, const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_qx_h_ */

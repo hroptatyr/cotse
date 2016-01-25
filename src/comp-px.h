@@ -50,6 +50,6 @@ comp_px(uint8_t *restrict tgt, const uint32_t *restrict px, size_t np);
 /**
  * Decompress NZ bytes in C into price values, return number of prices. */
 extern size_t
-dcmp_px(uint32_t *restrict tgt, const uint8_t *restrict c, size_t nz);
+dcmp_px(uint32_t *restrict t, size_t nt, const uint8_t *restrict c, size_t nz);
 
 #endif	/* INCLUDED_comp_px_h_ */

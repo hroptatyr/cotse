@@ -133,8 +133,6 @@ comp_qx(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np)
 {
 	size_t res = 0U;
 
-	memcpy(tgt, &np, sizeof(np));
-	res += sizeof(np);
 	for (size_t i = 0U; i < np; i += MAX_NP) {
 		const size_t mt = MAX_NP < np - i ? MAX_NP : np - i;
 
@@ -146,21 +144,17 @@ comp_qx(uint8_t *restrict tgt, const uint64_t *restrict qx, size_t np)
 
 /* decompress */
 size_t
-dcmp_qx(uint64_t *restrict tgt, const uint8_t *restrict c, size_t nz)
+dcmp_qx(uint64_t *restrict tgt, size_t nt, const uint8_t *restrict c, size_t nz)
 {
 	size_t ci = 0U;
-	size_t np;
 
-	memcpy(&np, c, sizeof(np));
-	ci += sizeof(np);
-
-	for (size_t i = 0U; i < np; i += MAX_NP) {
-		const size_t mt = MAX_NP < np - i ? MAX_NP : np - i;
+	for (size_t i = 0U; i < nt; i += MAX_NP) {
+		const size_t mt = MAX_NP < nt - i ? MAX_NP : nt - i;
 
 		/* small NPs are unpacked in _dcmp_small() */
 		ci += _dcmp(tgt + i, mt, c + ci, nz - ci);
 	}
-	return np;
+	return nt;
 }
 
 /* comp-qx.c ends here */
