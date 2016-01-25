@@ -436,6 +436,8 @@ _rd_meta_chnk(const uint8_t *chnk, size_t chnz)
 
 
 /* file fiddling */
+static int _bang_fields(struct _ss_s *_s, const char *flds, size_t fldz);
+
 static int
 _updt_hdr(const struct _ss_s *_s, size_t metaz)
 {
@@ -504,10 +506,17 @@ _rd_meta(struct _ss_s *restrict _s, const uint8_t *blob, size_t bloz)
 		switch (c.type) {
 		case 'F':
 			/* fields, yay */
+			_bang_fields(_s, (const char*)c.data, c.z);
 			break;
 
 		case 'O':
 			/* obarray, fantastic */
+			with (cots_ob_t nuob = rd_ob(c.data, c.z)) {
+				if (nuob != NULL && _s->ob != NULL) {
+					free_cots_ob(_s->ob);
+				}
+				_s->ob = nuob;
+			}
 			break;
 
 		default:
@@ -1134,6 +1143,40 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 
 
 /* meta stuff */
+static int
+_bang_fields(struct _ss_s *_s, const char *flds, size_t fldz)
+{
+	const size_t nflds = _s->public.nfields;
+
+	if (flds[fldz - 1U] != '\0') {
+		/* that's bogus */
+		return -1;
+	} else if (_s->fields != NULL) {
+		/* aha */
+		free(_s->fields);
+	}
+	_s->fields = malloc(fldz);
+	flds = memcpy(_s->fields, flds, fldz);
+
+	/* bla, need to put shit into public fields */
+	if (_s->public.fields == NULL) {
+		_s->public.fields =
+			calloc(nflds + 1U, sizeof(*_s->public.fields));
+
+		if (_s->public.fields == NULL) {
+			/* don't worry */
+			return -1;
+		}
+	}
+	with (const char **f = deconst(_s->public.fields)) {
+		for (size_t i = 0U, fi = 0U; i < nflds && fi < fldz; i++) {
+			f[i] = flds + fi;
+			fi += strlen(flds + fi) + 1U;
+		}
+	}
+	return 0;
+}
+
 int
 cots_put_fields(cots_ss_t s, const char **fields)
 {
