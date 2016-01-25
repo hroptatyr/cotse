@@ -437,7 +437,7 @@ _wr_meta(const struct _ss_s *_s)
 			/* truncate back to old size */
 			goto tru_out;
 		}
-		res += mz;
+		res += nwr;
 	}
 
 	if (_s->ob != NULL) {
@@ -451,7 +451,7 @@ _wr_meta(const struct _ss_s *_s)
 			/* truncate back to old size */
 			goto tru_out;
 		}
-		res += mz;
+		res += nwr;
 	}
 	return res;
 
