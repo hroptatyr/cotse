@@ -112,7 +112,24 @@ totostr(char *restrict buf, size_t bsz, cots_to_t toff)
 	return bi + 9ULL;
 }
 
+static inline size_t
+xstrlncpy(char *restrict dst, size_t dsz, const char *src, size_t ssz)
+{
+	if (UNLIKELY(ssz > dsz)) {
+		ssz = dsz - 1U;
+	}
+	memcpy(dst, src, ssz);
+	dst[ssz] = '\0';
+	return ssz;
+}
 
+static size_t
+xstrlcpy(char *restrict dst, const char *src, size_t dsz)
+{
+	return xstrlncpy(dst, dsz, src, strlen(src));
+}
+
+
 static void
 dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 {
@@ -158,8 +175,16 @@ dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
 				lp += totostr(lp, lz, t);
 				break;
 			}
+			case COTS_LO_STR: {
+				uint64_t *sp = cols->cols[j];
+				const char *s = cots_str(hdl, sp[i]);
+
+				*lp++ = '\t';
+				lp += xstrlcpy(lp, s, lz);
+				break;
+			}
+
 			case COTS_LO_CNT:
-			case COTS_LO_TAG:
 			case COTS_LO_SIZ: {
 				uint64_t *zp = cols->cols[j];
 
@@ -201,6 +226,16 @@ main(int argc, char *argv[])
 			serror("Error: cannot open file `%s'", argv[i]);
 			rc = 1;
 			continue;
+		}
+
+		/* print fields */
+		if (hdl->fields) {
+			fputs("TIME", stdout);
+			for (size_t j = 0U; j < hdl->nfields; j++) {
+				fputc('\t', stdout);
+				fputs(hdl->fields[j], stdout);
+			}
+			fputc('\n', stdout);
 		}
 
 		/* use a generic tsoa */

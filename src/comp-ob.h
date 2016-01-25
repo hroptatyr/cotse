@@ -52,14 +52,4 @@ comp_tag(uint8_t *restrict tgt, const cots_tag_t *restrict m, size_t nm);
 extern size_t
 dcmp_tag(cots_tag_t *restrict tgt, const uint8_t *restrict c, size_t nz);
 
-/**
- * Compress obarray OB into TGT, return the number of bytes. */
-extern size_t
-comp_ob(uint8_t *restrict tgt, const struct cots_ob_s *restrict ob);
-
-/**
- * Decompress NZ bytes in C into obarray, return obarray object. */
-extern cots_ob_t
-dcmp_ob(const uint8_t *restrict c, size_t nz);
-
 #endif	/* INCLUDED_comp_ob_h_ */

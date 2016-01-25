@@ -91,6 +91,13 @@ struct blob_s {
 	cots_to_t till;
 };
 
+/* meta chunks */
+struct chnk_s {
+	const uint8_t *data;
+	size_t z;
+	uint8_t type;
+};
+
 struct pbuf_s {
 	/* size of one row with alignment */
 	size_t zrow;
@@ -127,6 +134,9 @@ struct _ss_s {
 
 	/* index, if any, this will be recursive */
 	cots_idx_t idx;
+
+	/* obarray */
+	cots_ob_t ob;
 };
 
 static const char nul_layout[] = "";
@@ -219,7 +229,7 @@ _algn_zrow(const char *layout, size_t nflds)
 			break;
 		case COTS_LO_TIM:
 		case COTS_LO_CNT:
-		case COTS_LO_TAG:
+		case COTS_LO_STR:
 		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL:
@@ -318,7 +328,7 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 		}
 		case COTS_LO_TIM:
 		case COTS_LO_CNT:
-		case COTS_LO_TAG:
+		case COTS_LO_STR:
 		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
@@ -385,8 +395,49 @@ _last_toff(const struct _ss_s *_s)
 	return tp[_s->pb.rowi * _s->pb.zrow / sizeof(cots_to_t)];
 }
 
+static ssize_t
+_wr_meta_chnk(int fd, struct chnk_s chnk)
+{
+/* write a chunk of meta data */
+	uint64_t tz = (chnk.z << 8U) ^ (chnk.type);
+	ssize_t nwr = 0;
+
+	/* big-endianify */
+	tz = htobe64(tz);
+	/* write tz, then data */
+	nwr += write(fd, &tz, sizeof(tz));
+	nwr += write(fd, chnk.data, chnk.z);
+	return (nwr == chnk.z + sizeof(tz)) ? nwr : -1;
+}
+
+static struct chnk_s
+_rd_meta_chnk(const uint8_t *chnk, size_t chnz)
+{
+	uint64_t tz;
+	size_t z;
+	uint8_t t;
+
+	if (UNLIKELY(chnz < sizeof(tz))) {
+		/* can't be */
+		return (struct chnk_s){NULL};
+	}
+	/* otherwise snarf the type-size */
+	memcpy(&tz, chnk, sizeof(tz));
+	tz = be64toh(tz);
+	t = tz & 0xffU;
+	z = tz >> 8U;
+	/* check sizes again, avoid overreading a page boundary */
+	if (UNLIKELY(sizeof(tz) + z > chnz)) {
+		return (struct chnk_s){NULL};
+	}
+	/* otherwise it's good to go */
+	return (struct chnk_s){chnk + sizeof(tz), z, t};
+}
+
 
 /* file fiddling */
+static int _bang_fields(struct _ss_s *_s, const char *flds, size_t fldz);
+
 static int
 _updt_hdr(const struct _ss_s *_s, size_t metaz)
 {
@@ -400,6 +451,82 @@ _updt_hdr(const struct _ss_s *_s, size_t metaz)
 	return 0;
 }
 
+static size_t
+_wr_meta(const struct _ss_s *_s)
+{
+	size_t res = 0U;
+
+	/* deal with them fields first */
+	if (_s->fields) {
+		const size_t nflds = _s->public.nfields;
+		const char *_1st = _s->public.fields[0U];
+		const char *last = _s->public.fields[nflds - 1U];
+		ssize_t mz = last - _1st + strlen(last) + 1U;
+		ssize_t nwr;
+
+		nwr = _wr_meta_chnk(
+			_s->fd, (struct chnk_s){(uint8_t*)_s->fields, mz, 'F'});
+
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			goto tru_out;
+		}
+		res += nwr;
+	}
+
+	if (_s->ob != NULL) {
+		const uint8_t *tgt;
+		size_t mz = wr_ob(&tgt, _s->ob);
+		ssize_t nwr;
+
+		nwr = _wr_meta_chnk(_s->fd, (struct chnk_s){tgt, mz, 'O'});
+
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			goto tru_out;
+		}
+		res += nwr;
+	}
+	return res;
+
+tru_out:
+	(void)ftruncate(_s->fd, _s->fo);
+	return 0U;
+}
+
+static int
+_rd_meta(struct _ss_s *restrict _s, const uint8_t *blob, size_t bloz)
+{
+	struct chnk_s c;
+
+	for (size_t bi = 0U;
+	     bi < bloz && (c = _rd_meta_chnk(blob + bi, bloz - bi)).data;
+	     bi = c.data + c.z - blob) {
+		/* only handle chunks with known types */
+		switch (c.type) {
+		case 'F':
+			/* fields, yay */
+			_bang_fields(_s, (const char*)c.data, c.z);
+			break;
+
+		case 'O':
+			/* obarray, fantastic */
+			with (cots_ob_t nuob = rd_ob(c.data, c.z)) {
+				if (nuob != NULL && _s->ob != NULL) {
+					free_cots_ob(_s->ob);
+				}
+				_s->ob = nuob;
+			}
+			break;
+
+		default:
+			/* user rubbish */
+			break;
+		}
+	}
+	return (c.data != NULL) - 1;
+}
+
 static int
 _flush(struct _ss_s *_s)
 {
@@ -407,7 +534,7 @@ _flush(struct _ss_s *_s)
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
 	struct blob_s b;
-	size_t metaz = 0U;
+	size_t mz;
 	int rc = 0;
 
 	if (UNLIKELY(!_s->pb.rowi)) {
@@ -455,26 +582,10 @@ _flush(struct _ss_s *_s)
 
 	/* put stuff like field names, obarray, etc. into the meta section
 	 * this will not update the FO */
-	if (_s->fields) {
-		const char *_1st = _s->public.fields[0U];
-		const char *last = _s->public.fields[nflds - 1U];
-
-		metaz = last - _1st + strlen(last) + 1U;
-	}
-	/* manifest in file */
-	if (metaz) {
-		ssize_t nwr = write(_s->fd, (_s->fields ?: nul_layout), metaz);
-
-		if (UNLIKELY(nwr < 0)) {
-			/* truncate back to old size */
-			(void)ftruncate(_s->fd, _s->fo);
-			rc = -1;
-			goto fre_out;
-		}
-	}
+	mz = _wr_meta(_s);
 
 	/* update header */
-	_updt_hdr(_s, metaz);
+	_updt_hdr(_s, mz);
 
 fre_out:
 	_free_blob(b);
@@ -563,6 +674,10 @@ make_cots_ss(const char *layout, size_t blockz)
 	/* use a backing file? */
 	res->fd = -1;
 
+	/* create an obarray if there's strings */
+	if (strchr(res->public.layout, COTS_LO_STR)) {
+		res->ob = make_cots_ob();
+	}
 	return (cots_ss_t)res;
 }
 
@@ -580,6 +695,9 @@ free_cots_ss(cots_ss_t ss)
 		free(_ss->fields);
 	}
 	_free_pbuf(_ss->pb);
+	if (_ss->ob != NULL) {
+		free_cots_ob(_ss->ob);
+	}
 	free(_ss);
 	return;
 }
@@ -669,6 +787,27 @@ cots_open_ss(const char *file, int flags)
 	res->fl = flags;
 	res->fo = be64toh(res->mdr->moff) ?: st.st_size;
 	res->ro = _hdrz(res);
+
+	/* short dip into the meta pool */
+	with (off_t noff = be64toh(res->mdr->noff)) {
+		off_t moff = res->fo;
+		uint8_t *m;
+
+		if (moff >= noff) {
+			/* not for us this isn't */
+			break;
+		}
+		/* try mapping him */
+		m = mmap_any(fd, PROT_READ, MAP_SHARED, moff, noff - moff);
+		if (UNLIKELY(m == NULL)) {
+			/* it's no good */
+			break;
+		}
+		/* try reading him */
+		(void)_rd_meta(res, m, noff - moff);
+
+		(void)munmap_any(m, moff, noff - moff);
+	}
 
 	/* use a backing file */
 	return (cots_ss_t)res;
@@ -917,7 +1056,7 @@ cots_write_va(cots_ss_t s, cots_to_t t, ...)
 		}
 		case COTS_LO_TIM:
 		case COTS_LO_CNT:
-		case COTS_LO_TAG:
+		case COTS_LO_STR:
 		case COTS_LO_SIZ:
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
@@ -1004,6 +1143,40 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 
 
 /* meta stuff */
+static int
+_bang_fields(struct _ss_s *_s, const char *flds, size_t fldz)
+{
+	const size_t nflds = _s->public.nfields;
+
+	if (flds[fldz - 1U] != '\0') {
+		/* that's bogus */
+		return -1;
+	} else if (_s->fields != NULL) {
+		/* aha */
+		free(_s->fields);
+	}
+	_s->fields = malloc(fldz);
+	flds = memcpy(_s->fields, flds, fldz);
+
+	/* bla, need to put shit into public fields */
+	if (_s->public.fields == NULL) {
+		_s->public.fields =
+			calloc(nflds + 1U, sizeof(*_s->public.fields));
+
+		if (_s->public.fields == NULL) {
+			/* don't worry */
+			return -1;
+		}
+	}
+	with (const char **f = deconst(_s->public.fields)) {
+		for (size_t i = 0U, fi = 0U; i < nflds && fi < fldz; i++) {
+			f[i] = flds + fi;
+			fi += strlen(flds + fi) + 1U;
+		}
+	}
+	return 0;
+}
+
 int
 cots_put_fields(cots_ss_t s, const char **fields)
 {
@@ -1051,6 +1224,20 @@ cots_put_fields(cots_ss_t s, const char **fields)
 	}
 	_s->fields = flds;
 	return 0;
+}
+
+cots_tag_t
+cots_tag(cots_ss_t s, const char *str, size_t len)
+{
+	struct _ss_s *_s = (void*)s;
+	return cots_intern(_s->ob, str, len);
+}
+
+const char*
+cots_str(cots_ss_t s, cots_tag_t tag)
+{
+	struct _ss_s *_s = (void*)s;
+	return _s->ob ? cots_tag_name(_s->ob, tag) : NULL;
 }
 
 /* cotse.c ends here */

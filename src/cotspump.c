@@ -88,7 +88,7 @@ push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 	long unsigned int s, x;
 	cots_px_t b;
 	cots_px_t a;
-	cots_tag_t m = 1U;
+	cots_tag_t m;
 
 	if (line[20U] != '\t') {
 		return (struct samp_s){{0U}, 0U};
@@ -103,6 +103,9 @@ push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 
 	with (const char *ecn = ++on) {
 		if (UNLIKELY((on = strchr(ecn, '\t')) == NULL)) {
+			return (struct samp_s){{0U}, 0U};
+		} else if (UNLIKELY(!(m = cots_tag(ts, ecn, on - ecn)))) {
+			/* fuck */
 			return (struct samp_s){{0U}, 0U};
 		}
 	}
@@ -130,7 +133,7 @@ main(int argc, char *argv[])
 	char *line = NULL;
 	size_t llen = 0U;
 
-	if ((db = make_cots_ss("mpp", 0U)) == NULL) {
+	if ((db = make_cots_ss("spp", 0U)) == NULL) {
 		return 1;
 	}
 	cots_put_fields(db, (const char*[]){"source", "bid", "ask"});

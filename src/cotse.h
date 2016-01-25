@@ -100,7 +100,7 @@ typedef struct cots_ss_s {
 #define COTS_LO_END	'\0'
 #define COTS_LO_BYT	'b'
 #define COTS_LO_TIM	't'
-#define COTS_LO_TAG	'm'
+#define COTS_LO_STR	's'
 #define COTS_LO_PRC	'p'
 #define COTS_LO_QTY	'q'
 #define COTS_LO_FLT	'f'
@@ -158,6 +158,10 @@ extern int cots_close_ss(cots_ss_t);
 /**
  * Return tag representation of STR (of length LEN). */
 extern cots_tag_t cots_tag(cots_ss_t, const char *str, size_t len);
+
+/**
+ * Return the string representation of TAG in TS. */
+extern const char *cots_str(cots_ss_t, cots_tag_t);
 
 
 /**
