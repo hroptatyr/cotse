@@ -388,6 +388,21 @@ _last_toff(const struct _ss_s *_s)
 	return tp[_s->pb.rowi * _s->pb.zrow / sizeof(cots_to_t)];
 }
 
+static ssize_t
+_wr_meta_chnk(int fd, uint8_t type, const uint8_t *data, size_t len)
+{
+/* write a chunk of meta data */
+	uint64_t tz = (len << 8U) ^ (type);
+	ssize_t nwr = 0;
+
+	/* big-endianify */
+	tz = htobe64(tz);
+	/* write tz, then data */
+	nwr += write(fd, &tz, sizeof(tz));
+	nwr += write(fd, data, len);
+	return nwr == len + sizeof(tz) ? nwr : -1;
+}
+
 
 /* file fiddling */
 static int
@@ -403,6 +418,48 @@ _updt_hdr(const struct _ss_s *_s, size_t metaz)
 	return 0;
 }
 
+static size_t
+_wr_meta(const struct _ss_s *_s)
+{
+	size_t res = 0U;
+
+	/* deal with them fields first */
+	if (_s->fields) {
+		const size_t nflds = _s->public.nfields;
+		const char *_1st = _s->public.fields[0U];
+		const char *last = _s->public.fields[nflds - 1U];
+		ssize_t mz = last - _1st + strlen(last) + 1U;
+		ssize_t nwr;
+
+		nwr = _wr_meta_chnk(_s->fd, 'F', (uint8_t*)_s->fields, mz);
+
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			goto tru_out;
+		}
+		res += mz;
+	}
+
+	if (_s->ob != NULL) {
+		const uint8_t *tgt;
+		size_t mz = wr_ob(&tgt, _s->ob);
+		ssize_t nwr;
+
+		nwr = _wr_meta_chnk(_s->fd, 'O', tgt, mz);
+
+		if (UNLIKELY(nwr < 0)) {
+			/* truncate back to old size */
+			goto tru_out;
+		}
+		res += mz;
+	}
+	return res;
+
+tru_out:
+	(void)ftruncate(_s->fd, _s->fo);
+	return 0U;
+}
+
 static int
 _flush(struct _ss_s *_s)
 {
@@ -410,7 +467,7 @@ _flush(struct _ss_s *_s)
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
 	struct blob_s b;
-	size_t metaz = 0U;
+	size_t mz;
 	int rc = 0;
 
 	if (UNLIKELY(!_s->pb.rowi)) {
@@ -458,26 +515,10 @@ _flush(struct _ss_s *_s)
 
 	/* put stuff like field names, obarray, etc. into the meta section
 	 * this will not update the FO */
-	if (_s->fields) {
-		const char *_1st = _s->public.fields[0U];
-		const char *last = _s->public.fields[nflds - 1U];
-
-		metaz = last - _1st + strlen(last) + 1U;
-	}
-	/* manifest in file */
-	if (metaz) {
-		ssize_t nwr = write(_s->fd, (_s->fields ?: nul_layout), metaz);
-
-		if (UNLIKELY(nwr < 0)) {
-			/* truncate back to old size */
-			(void)ftruncate(_s->fd, _s->fo);
-			rc = -1;
-			goto fre_out;
-		}
-	}
+	mz = _wr_meta(_s);
 
 	/* update header */
-	_updt_hdr(_s, metaz);
+	_updt_hdr(_s, mz);
 
 fre_out:
 	_free_blob(b);
