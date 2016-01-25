@@ -63,4 +63,16 @@ extern cots_ob_t make_cots_ob(void);
  * Free an obarray. */
 extern void free_cots_ob(cots_ob_t);
 
+
+/* serialiser */
+/**
+ * Prepare obarray OB for serialising, return size in bytes. */
+extern size_t
+wr_ob(uint8_t **const tgt, const struct cots_ob_s *restrict ob);
+
+/**
+ * Deserialise obarray in C of size NZ (bytes). */
+extern cots_ob_t
+rd_ob(const uint8_t *restrict c, size_t nz);
+
 #endif	/* INCLUDED_intern_h_ */
