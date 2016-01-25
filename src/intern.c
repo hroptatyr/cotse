@@ -258,7 +258,7 @@ cots_tag_name(cots_ob_t ob, cots_tag_t m)
 
 /* serialiser API */
 size_t
-wr_ob(uint8_t **const tgt, const struct cots_ob_s *restrict ob)
+wr_ob(const uint8_t **tgt, const struct cots_ob_s *restrict ob)
 {
 	const size_t off = ob->off[ob->nobs];
 

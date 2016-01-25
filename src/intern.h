@@ -68,7 +68,7 @@ extern void free_cots_ob(cots_ob_t);
 /**
  * Prepare obarray OB for serialising, return size in bytes. */
 extern size_t
-wr_ob(uint8_t **const tgt, const struct cots_ob_s *restrict ob);
+wr_ob(const uint8_t **tgt, const struct cots_ob_s *restrict ob);
 
 /**
  * Deserialise obarray in C of size NZ (bytes). */
