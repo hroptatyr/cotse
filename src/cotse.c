@@ -933,6 +933,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
  * 8.      x            x             x
  */
 	struct fhdr_s *mdr;
+	struct wal_s *wal;
 	struct stat st;
 	int fd;
 
@@ -957,6 +958,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		if (UNLIKELY(mdr == NULL)) {
 			goto clo_out;
 		}
+		/* map the wal */
+		wal = mmap_any(fd, PROT_READ | PROT_WRITE, MAP_SHARED, hz, wz);
 		/* bang a basic header out */
 		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
 			/* keep track of block size */
@@ -987,6 +990,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		}
 		/* yep they do, switch off write protection */
 		(void)mprot_any(mdr, 0, hz, PROT_WRITE);
+
+		wal = NULL;
 	}
 
 	/* we're good to go, detach any old files */
@@ -1002,6 +1007,14 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		/* store current index offs or file size as blob offs */
 		_s->fo = be64toh(mdr->moff) ?: st.st_size;
 		_s->ro = _hdrz(_s);
+
+		if (wal != NULL) {
+			/* copy wal */
+			off_t wz = _walz(_s->zrow, _s->public.blockz);
+			memcpy(wal, _s->wal, wz);
+			_free_wal(_s->wal, _s->zrow, _s->public.blockz);
+			_s->wal = wal;
+		}
 	}
 	return 0;
 
