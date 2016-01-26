@@ -131,7 +131,7 @@ xstrlcpy(char *restrict dst, const char *src, size_t dsz)
 
 
 static void
-dump(cots_ss_t hdl, const struct cots_tsoa_s *cols, size_t n)
+dump(cots_ts_t hdl, const struct cots_tsoa_s *cols, size_t n)
 {
 	for (size_t i = 0U; i < n; i++) {
 		char *lp = line;
@@ -219,10 +219,10 @@ main(int argc, char *argv[])
 	}
 
 	for (int i = 1; i < argc; i++) {
-		cots_ss_t hdl;
+		cots_ts_t hdl;
 		ssize_t n;
 
-		if ((hdl = cots_open_ss(argv[i], O_RDONLY)) == NULL) {
+		if ((hdl = cots_open_ts(argv[i], O_RDONLY)) == NULL) {
 			serror("Error: cannot open file `%s'", argv[i]);
 			rc = 1;
 			continue;
@@ -246,7 +246,7 @@ main(int argc, char *argv[])
 			}
 			cots_fini_tsoa(cols, hdl);
 		}
-		cots_close_ss(hdl);
+		cots_close_ts(hdl);
 	}
 	free(line);
 	return rc;

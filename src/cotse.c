@@ -641,8 +641,8 @@ tru_out:
 
 
 /* public series storage API */
-cots_ss_t
-make_cots_ss(const char *layout, size_t blockz)
+cots_ts_t
+make_cots_ts(const char *layout, size_t blockz)
 {
 	struct _ss_s *res;
 	size_t laylen;
@@ -685,11 +685,11 @@ make_cots_ss(const char *layout, size_t blockz)
 	if (strchr(res->public.layout, COTS_LO_STR)) {
 		res->ob = make_cots_ob();
 	}
-	return (cots_ss_t)res;
+	return (cots_ts_t)res;
 }
 
 void
-free_cots_ss(cots_ss_t ss)
+free_cots_ts(cots_ts_t ss)
 {
 	struct _ss_s *_ss = (void*)ss;
 
@@ -709,8 +709,8 @@ free_cots_ss(cots_ss_t ss)
 	return;
 }
 
-cots_ss_t
-cots_open_ss(const char *file, int flags)
+cots_ts_t
+cots_open_ts(const char *file, int flags)
 {
 	struct _ss_s *res;
 	struct fhdr_s hdr;
@@ -817,7 +817,7 @@ cots_open_ss(const char *file, int flags)
 	}
 
 	/* use a backing file */
-	return (cots_ss_t)res;
+	return (cots_ts_t)res;
 
 fre_out:
 	free(deconst(res->public.filename));
@@ -831,16 +831,16 @@ clo_out:
 }
 
 int
-cots_close_ss(cots_ss_t s)
+cots_close_ts(cots_ts_t s)
 {
 	cots_detach(s);
-	free_cots_ss(s);
+	free_cots_ts(s);
 	return 0;
 }
 
 
 int
-cots_attach(cots_ss_t s, const char *file, int flags)
+cots_attach(cots_ts_t s, const char *file, int flags)
 {
 /* we've got the following cases
  *    S has data   S has file   FILE has data
@@ -935,10 +935,10 @@ clo_out:
 }
 
 int
-cots_detach(cots_ss_t s)
+cots_detach(cots_ts_t s)
 {
 /* this is the authority in closing,
- * both free_cots_ss() and cots_close_ss() will unconditionally call this. */
+ * both free_cots_ts() and cots_close_ss() will unconditionally call this. */
 	struct _ss_s *_s = (void*)s;
 
 	cots_freeze(s);
@@ -966,7 +966,7 @@ cots_detach(cots_ss_t s)
 }
 
 int
-cots_freeze(cots_ss_t s)
+cots_freeze(cots_ts_t s)
 {
 	struct _ss_s *_s = (void*)s;
 	int rc;
@@ -996,7 +996,7 @@ cots_freeze(cots_ss_t s)
 
 
 int
-cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
+cots_bang_tick(cots_ts_t s, const struct cots_tick_s *data)
 {
 	struct _ss_s *_s = (void*)s;
 
@@ -1010,7 +1010,7 @@ cots_bang_tick(cots_ss_t s, const struct cots_tick_s *data)
 }
 
 int
-cots_keep_last(cots_ss_t s)
+cots_keep_last(cots_ts_t s)
 {
 	struct _ss_s *_s = (void*)s;
 	const size_t blkz = _s->public.blockz;
@@ -1029,7 +1029,7 @@ cots_keep_last(cots_ss_t s)
 
 
 int
-cots_write_tick(cots_ss_t s, const struct cots_tick_s *data)
+cots_write_tick(cots_ts_t s, const struct cots_tick_s *data)
 {
 	return !(cots_bang_tick(s, data) < 0)
 		? cots_keep_last(s)
@@ -1037,7 +1037,7 @@ cots_write_tick(cots_ss_t s, const struct cots_tick_s *data)
 }
 
 int
-cots_write_va(cots_ss_t s, cots_to_t t, ...)
+cots_write_va(cots_ts_t s, cots_to_t t, ...)
 {
 	struct _ss_s *_s = (void*)s;
 	const char *flds = _s->public.layout;
@@ -1081,7 +1081,7 @@ cots_write_va(cots_ss_t s, cots_to_t t, ...)
 }
 
 int
-cots_init_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
+cots_init_tsoa(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 {
 	const size_t blkz = s->blockz;
 	const size_t nflds = s->nfields;
@@ -1097,7 +1097,7 @@ cots_init_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
 }
 
 int
-cots_fini_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t UNUSED(s))
+cots_fini_tsoa(struct cots_tsoa_s *restrict tgt, cots_ts_t UNUSED(s))
 {
 	if (UNLIKELY(tgt->toffs == NULL)) {
 		return -1;
@@ -1107,7 +1107,7 @@ cots_fini_tsoa(struct cots_tsoa_s *restrict tgt, cots_ss_t UNUSED(s))
 }
 
 ssize_t
-cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ss_t s)
+cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 {
 /* currently this is mmap only */
 	struct _ss_s *_s = (void*)s;
@@ -1198,7 +1198,7 @@ _bang_fields(struct _ss_s *_s, const char *flds, size_t fldz)
 }
 
 int
-cots_put_fields(cots_ss_t s, const char **fields)
+cots_put_fields(cots_ts_t s, const char **fields)
 {
 	struct _ss_s *_s = (void*)s;
 	const size_t nfields = _s->public.nfields;
@@ -1247,14 +1247,14 @@ cots_put_fields(cots_ss_t s, const char **fields)
 }
 
 cots_tag_t
-cots_tag(cots_ss_t s, const char *str, size_t len)
+cots_tag(cots_ts_t s, const char *str, size_t len)
 {
 	struct _ss_s *_s = (void*)s;
 	return cots_intern(_s->ob, str, len);
 }
 
 const char*
-cots_str(cots_ss_t s, cots_tag_t tag)
+cots_str(cots_ts_t s, cots_tag_t tag)
 {
 	struct _ss_s *_s = (void*)s;
 	return _s->ob ? cots_tag_name(_s->ob, tag) : NULL;
