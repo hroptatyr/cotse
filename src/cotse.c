@@ -779,10 +779,6 @@ cots_open_ts(const char *file, int flags)
 		memcpy(bzp, &blkz, sizeof(blkz));
 	}
 
-	/* get some scratch space for this one */
-	if (flags) {
-		res->pb = _make_pbuf(zrow, blkz);
-	}
 	/* map the header for reference */
 	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
 	if (UNLIKELY(res->mdr == NULL)) {
@@ -814,6 +810,39 @@ cots_open_ts(const char *file, int flags)
 		(void)_rd_meta(res, m, noff - moff);
 
 		(void)munmap_any(m, moff, noff - moff);
+	}
+
+	/* get some scratch space and dissect the file parts */
+	if (flags/*O_RDWR*/) {
+		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
+		size_t flen = strlen(file);
+		/* for the temp file name */
+		char idxfn[flen + 5U];
+		int ifd;
+
+		/* get breathing space */
+		res->pb = _make_pbuf(zrow, blkz);
+
+		/* construct temp filename */
+		memcpy(idxfn, file, flen);
+		memcpy(idxfn + flen, ".idx", sizeof(".idx"));
+
+		/* check if exists first? */
+		ifd = open(idxfn, O_CREAT | O_TRUNC | O_RDWR, 0666);
+
+		/* evacuate index */
+		while (so < st.st_size) {
+			ssize_t nsf = sendfile(ifd, res->fd, &so, st.st_size - so);
+
+			if (UNLIKELY(nsf <= 0)) {
+				/* oh great :| */
+				unlink(idxfn);
+			}
+		}
+		close(ifd);
+
+		/* truncate to size without index nor meta */
+		ftruncate(res->fd, res->fo);
 	}
 
 	/* use a backing file */
