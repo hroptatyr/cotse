@@ -575,17 +575,17 @@ _flush(struct _ss_s *_s)
 			goto fre_out;
 		}
 	}
+	/* advance file offset and celebrate */
+	_s->fo += b.z;
+
 	/* add to index */
 	if (_s->idx) {
 		cots_add_index(
 			_s->idx,
 			(struct trng_s){b.from, b.till},
-			(struct orng_s){_s->fo, _s->fo + b.z},
+			(struct orng_s){_s->fo - b.z, _s->fo},
 			_s->pb.rowi);
 	}
-
-	/* advance file offset and celebrate */
-	_s->fo += b.z;
 
 	/* put stuff like field names, obarray, etc. into the meta section
 	 * this will not update the FO */
