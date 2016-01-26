@@ -41,7 +41,7 @@
 #define INCLUDED_index_h_
 #include "cotse.h"
 
-typedef cots_ss_t cots_idx_t;
+typedef cots_ts_t cots_idx_t;
 
 struct trng_s {
 	cots_to_t from;

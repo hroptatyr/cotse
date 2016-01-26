@@ -57,11 +57,11 @@ struct idxt_s {
 cots_idx_t
 make_cots_idx(const char *filename)
 {
-	cots_ss_t res;
+	cots_ts_t res;
 
 	if (UNLIKELY(filename == NULL)) {
 		goto nul_out;
-	} else if (UNLIKELY((res = make_cots_ss("cz", 512U)) == NULL)) {
+	} else if (UNLIKELY((res = make_cots_ts("cz", 512U)) == NULL)) {
 		goto nul_out;
 	}
 	/* construct temp filename */
@@ -78,7 +78,7 @@ make_cots_idx(const char *filename)
 	return res;
 
 fre_out:
-	free_cots_ss(res);
+	free_cots_ts(res);
 nul_out:
 	return NULL;
 }
@@ -90,7 +90,7 @@ free_cots_idx(cots_idx_t s)
 	char idxfn[idxfz + 1U/*\nul*/];
 
 	memcpy(idxfn, s->filename, idxfz + 1U/*\nul*/);
-	free_cots_ss(s);
+	free_cots_ts(s);
 	/* blindly rm him */
 	(void)unlink(idxfn);
 	return;

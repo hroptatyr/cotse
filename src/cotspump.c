@@ -82,7 +82,7 @@ serror(const char *fmt, ...)
 }
 
 static struct samp_s
-push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
+push(cots_ts_t ts, const char *line, size_t UNUSED(llen))
 {
 	char *on;
 	long unsigned int s, x;
@@ -128,12 +128,12 @@ push(cots_ss_t ts, const char *line, size_t UNUSED(llen))
 int
 main(int argc, char *argv[])
 {
-	cots_ss_t db;
+	cots_ts_t db;
 	int rc = 0;
 	char *line = NULL;
 	size_t llen = 0U;
 
-	if ((db = make_cots_ss("spp", 0U)) == NULL) {
+	if ((db = make_cots_ts("spp", 0U)) == NULL) {
 		return 1;
 	}
 	cots_put_fields(db, (const char*[]){"source", "bid", "ask"});
@@ -156,7 +156,7 @@ main(int argc, char *argv[])
 		}
 	}
 	free(line);
-	free_cots_ss(db);
+	free_cots_ts(db);
 	return rc;
 }
 
