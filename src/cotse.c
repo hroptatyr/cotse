@@ -358,6 +358,12 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 		memcpy(buf, &zn, sizeof(zn));
 		z += sizeof(zn);
 	}
+	/* to traverse the file backwards, store the size and a crc24 */
+	with (uint64_t zc = (z << 24U) ^ (0U)) {
+		zc = htobe64(zc);
+		memcpy(buf + z, &zc, sizeof(zc));
+		z += sizeof(zc);
+	}
 
 	/* make the map a bit tinier */
 	with (uint8_t *blo = mremap(buf, bsz, z, MREMAP_MAYMOVE)) {
@@ -1180,6 +1186,18 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 		}
 
 		rz += sizeof(zn);
+
+		/* check footer */
+		with (uint64_t zc) {
+			memcpy(&zc, mp + rz, sizeof(zc));
+			zc = be64toh(zc);
+			if (zc >> 24U != rz) {
+				/* too late now innit? */
+				;
+			}
+
+			rz += sizeof(zc);
+		}
 	}
 
 	/* unmap */
