@@ -103,8 +103,19 @@ struct wal_s {
 	/* header is the same as for beef pages,
 	 * the lowest 24bits are the row index
 	 * the size bits (the remaining 40bits) are 0
-	 * all values are stored big-endian */
+	 * as opposed to beef pages this value is stored
+	 * in native endian and prefixed with \nul bytes
+	 * to align it 8 mod 16 */
 	uint64_t hdr;
+	/* the ordinary data, aligned on a 16 byte boundary
+	 * also at the end is the footer, a uint64_t with
+	 * the same semantics (and written in big-endian)
+	 * as the footer on beef pages
+	 * when the WAL is hot the footer value can be set
+	 * to 0x0000000000000000U
+	 * A client encountering that value is asked to
+	 * compute the WAL size itself (using the block
+	 * size and the inferred row size) */
 	uint8_t data[];
 };
 
@@ -281,7 +292,7 @@ static inline __attribute__((const)) size_t
 _wal_rowi(const struct wal_s *w)
 {
 /* return row index in native form */
-	return be64toh(w->hdr);
+	return w->hdr;
 }
 
 static inline void
@@ -295,9 +306,7 @@ _wal_rset(struct wal_s *w)
 static inline size_t
 _wal_rinc(struct wal_s *w)
 {
-	const size_t rowi = be64toh(w->hdr) + 1U;
-	w->hdr = htobe64(rowi);
-	return rowi;
+	return ++w->hdr;
 }
 
 
