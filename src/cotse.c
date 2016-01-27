@@ -960,6 +960,11 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		_s->fo = be64toh(mdr->moff) ?: st.st_size;
 		_s->ro = _hdrz(_s);
 
+		/* (re)attach the wal */
+		with (struct cots_wal_s *wal) {
+			wal = _wal_attach(_s->wal, file);
+			_free_wal(_s->wal);
+			_s->wal = wal;
 		}
 	}
 	return 0;
@@ -982,6 +987,13 @@ cots_detach(cots_ts_t s)
 
 	cots_freeze(s);
 
+	if (_s->wal &&_wal_detach(_s->wal, _s->public.filename) < 0) {
+		/* great, just keep using the wal */
+		;
+	} else if (_s->wal) {
+		/* no more using the WAL from now on */
+		_s->wal = NULL;
+	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
 		free_cots_idx(_s->idx);

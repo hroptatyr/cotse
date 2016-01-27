@@ -92,7 +92,7 @@ struct cots_wal_s*
 _wal_attach(const struct cots_wal_s *w, const char *fn)
 {
 	const size_t fz = _walz(w);
-	struct cots_wal_s *res;
+	struct cots_wal_s *res = NULL;
 	int fd;
 
 	if (UNLIKELY(fn == NULL)) {
@@ -121,12 +121,31 @@ _wal_attach(const struct cots_wal_s *w, const char *fn)
 	}
 	/* copy source wal */
 	memcpy(res, w, fz);
-	return res;
 
 clo_out:
+	/* close the descriptor but leave the mapping */
 	close(fd);
 nul_out:
-	return NULL;
+	return res;
+}
+
+int
+_wal_detach(const struct cots_wal_s *w, const char *fn)
+{
+	if (UNLIKELY(fn == NULL)) {
+		return -1;
+	}
+	_free_wal(deconst(w));
+	/* construct temp filename */
+	with (size_t z = strlen(fn)) {
+		char walfn[z + 5U];
+
+		memcpy(walfn, fn, z);
+		memcpy(walfn + z, ".wal", sizeof(".wal"));
+
+		unlink(walfn);
+	}
+	return 0;
 }
 
 /* wal.c ends here */
