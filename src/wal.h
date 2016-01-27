@@ -49,8 +49,8 @@ struct cots_wal_s {
 	const uint8_t version[2U];
 	/* COTS_ENDIAN written in native endian */
 	const uint16_t endian;
-	/* lowest 4bits of flags is the log2 of the block size minus 9 */
-	uint64_t flags;
+	/* block size in bytes and native endian */
+	uint64_t blkz;
 	/* row size in bytes and native endian */
 	const uint64_t zrow;
 	/* row index in native endian */

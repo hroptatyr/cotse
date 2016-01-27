@@ -57,21 +57,9 @@
 #endif	/* !MAP_ANON */
 
 static inline __attribute__((const, pure)) size_t
-exp_lgbz(uint64_t b)
-{
-	return 1ULL << (b & 0xfU) + 9U;
-}
-
-static inline __attribute__((const, pure)) uint64_t
-log_blkz(size_t b)
-{
-	return __builtin_ctz(b) - 9U;
-}
-
-static inline __attribute__((const, pure)) size_t
 _walz(const struct cots_wal_s *w)
 {
-	register const size_t blkz = exp_lgbz(be64toh(w->flags));
+	register const size_t blkz = w->blkz;
 	register const size_t zrow = w->zrow;
 	return blkz * zrow + sizeof(*w);
 }
@@ -88,9 +76,7 @@ _make_wal(size_t zrow, size_t blkz)
 		return NULL;
 	}
 	/* otherwise */
-	memcpy(w, &(struct cots_wal_s){
-		       "cots", "w0", COTS_ENDIAN,
-			       log_blkz(blkz), zrow},
+	memcpy(w, &(struct cots_wal_s){"cots", "w0", COTS_ENDIAN, blkz, zrow},
 	       sizeof(*w));
 	return w;
 }
