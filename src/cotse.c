@@ -205,7 +205,7 @@ min_z(size_t x, size_t y)
 static inline __attribute__((const, pure)) size_t
 exp_lgbz(uint64_t b)
 {
-	return (1ULL << b) + 9U;
+	return 1ULL << (b + 9U);
 }
 
 static inline __attribute__((const, pure)) uint64_t
