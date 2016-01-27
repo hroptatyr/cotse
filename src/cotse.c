@@ -754,6 +754,7 @@ cots_open_ts(const char *file, int flags)
 	}
 	/* make backing file known */
 	res->public.filename = strdup(file);
+	/* snarf the layout and calculate zrow size */
 	{
 		size_t zlay = 8U, olay = 0U;
 		char *layo = malloc(8U);
@@ -814,21 +815,94 @@ cots_open_ts(const char *file, int flags)
 		/* try reading him */
 		(void)_rd_meta(res, m, noff - moff);
 
+		/* don't leave a trace */
 		(void)munmap_any(m, moff, noff - moff);
 	}
 
-	/* get some scratch space and dissect the file parts */
+	if (flags/*O_RDWR*/) {
+		/* roll back last page into WAL */
+		const char *layo = res->public.layout;
+		off_t laso = res->fo - sizeof(uint64_t);
+		uint64_t lasz;
+		uint64_t xchk;
+
+		if (UNLIKELY(laso > st.st_size ||
+			     laso < (off_t)sizeof(*res->mdr))) {
+			goto fre_out;
+		} else if (UNLIKELY(pread(res->fd, &lasz, sizeof(lasz), laso)
+				    < (ssize_t)sizeof(lasz))) {
+			goto fre_out;
+		}
+		lasz = be64toh(lasz);
+		lasz >>= 24U;
+		laso -= lasz;
+
+		/* cross check */
+		if (UNLIKELY(pread(res->fd, &xchk, sizeof(xchk), laso)
+			     < (ssize_t)sizeof(xchk))) {
+			/* nope */
+			goto fre_out;
+		}
+		/* deendianify */
+		xchk = be64toh(xchk);
+
+		if (UNLIKELY((xchk >> 24U) + sizeof(uint64_t) != lasz)) {
+			/* no idea what that was then */
+			goto fre_out;
+		}
+
+		/* get some breathing space */
+		if (UNLIKELY((res->mwal = _make_wal(zrow, blkz)) == NULL)) {
+			goto fre_out;
+		}
+
+		if (LIKELY((xchk & 0xffffffU) + 1U < blkz)) {
+			const size_t nrows = (xchk & 0xffffffU) + 1U;
+			uint8_t *mp = mmap_any(
+				res->fd, PROT_READ, MAP_SHARED, laso, lasz);
+			size_t ntdcmp;
+			void *tgt[nflds + 1U];
+
+			if (UNLIKELY(mp == NULL)) {
+				goto wal_out;
+			}
+
+			printf("%zu %zu\n", zrow, blkz);
+
+			/* set up target with the mwal */
+			tgt[0U] = res->mwal->data;
+			for (size_t i = 1U; i <= nflds; i++) {
+				const size_t a = _algn_zrow(layo, i - 1U);
+				tgt[i] = res->mwal->data + a * blkz;
+			}
+			fflush(stdout);
+
+			/* decompress */
+			ntdcmp = dcmp(
+				(struct cots_tsoa_s*)tgt, nflds, nrows, layo,
+				mp + sizeof(xchk), lasz - sizeof(xchk));
+			if (UNLIKELY(ntdcmp != nrows)) {
+				goto wal_out;
+			}
+
+			/* unmap */
+			munmap_any(mp, laso, lasz);
+
+			/* wind back file offset, we'll truncate later */
+			res->fo = laso;
+		}
+
+		/* attach file to wal */
+		res->wal = _wal_attach(res->mwal, file);
+	}
+
+	/* dissect the file parts */
 	if (flags/*O_RDWR*/) {
 		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
 		size_t flen = strlen(file);
 		/* for the temp file name */
 		char idxfn[flen + 5U];
 		int ifd;
-
-		/* get breathing space */
-		if (UNLIKELY((res->wal = _make_wal(zrow, blkz)) == NULL)) {
-			goto fre_out;
-		}
 
 		/* construct temp filename */
 		memcpy(idxfn, file, flen);
@@ -848,14 +922,27 @@ cots_open_ts(const char *file, int flags)
 			}
 		}
 		close(ifd);
+	}
+
+	/* update header and stuff */
+	if (flags/*O_RDWR*/) {
+		const off_t moff = be64toh(res->mdr->moff);
+		const off_t noff = be64toh(res->mdr->noff);
+		const size_t metaz = moff < noff ? noff - moff : 0U;
+
+		(void)mprot_any(res->mdr, 0, _hdrz(res), PROT_MEM);
 
 		/* truncate to size without index nor meta */
 		(void)ftruncate(res->fd, res->fo);
+		/* update header */
+		_updt_hdr(res, metaz);
 	}
 
 	/* use a backing file */
 	return (cots_ts_t)res;
 
+wal_out:
+	_free_wal(res->mwal);
 fre_out:
 	free(deconst(res->public.filename));
 	free(res);
