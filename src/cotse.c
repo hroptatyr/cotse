@@ -70,8 +70,11 @@
 
 /* file header, mmapped for convenience */
 struct fhdr_s {
+	/* should be "cots" */
 	uint8_t magic[4U];
+	/* should be "v0" */
 	uint8_t version[2U];
+	/* COTS_ENDIAN written in native endian */
 	uint16_t endian;
 	/* tba
 	 * - lowest 4bits of flags is the log2 of the block size minus 9 */

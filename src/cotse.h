@@ -40,6 +40,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#define COTS_ENDIAN	((uint16_t)0x3c3eU)
+
 /**
  * Time offset with respect to a point on the timeline (cots_tm_t).
  * Measured in nanoseconds. */
