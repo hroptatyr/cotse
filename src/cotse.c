@@ -1000,6 +1000,7 @@ cots_detach(cots_ts_t s)
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
 		free_cots_idx(_s->idx);
+		_s->idx = NULL;
 	}
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
