@@ -111,11 +111,6 @@ struct _ss_s {
 	/* compacted version of fields */
 	char *fields;
 
-	/* flags for bookkeeping and stuff */
-	struct {
-		unsigned int frozen:1;
-	};
-
 	/* row-oriented page buffer, wal */
 	struct cots_wal_s *wal;
 	/* memory wal for swapsies */
@@ -1029,14 +1024,10 @@ cots_freeze(cots_ts_t s)
 	if (UNLIKELY(_s->fd < 0)) {
 		/* not on my watch */
 		return -1;
-	} else if (_s->frozen) {
-		return 0;
 	}
 
 	/* flush wal to file */
 	rc = _flush(_s);
-	/* set frozen flag */
-	_s->frozen = 1U;
 
 	if (_s->idx) {
 		/* this is bad coupling:
