@@ -704,7 +704,9 @@ free_cots_ts(cots_ts_t s)
 		free(deconst(_s->public.fields));
 		free(_s->fields);
 	}
-	_free_wal(_s->wal);
+	if (LIKELY(_s->wal != NULL)) {
+		_free_wal(_s->wal);
+	}
 	if (_s->ob != NULL) {
 		free_cots_ob(_s->ob);
 	}
@@ -824,7 +826,9 @@ cots_open_ts(const char *file, int flags)
 		int ifd;
 
 		/* get breathing space */
-		res->wal = _make_wal(zrow, blkz);
+		if (UNLIKELY((res->wal = _make_wal(zrow, blkz)) == NULL)) {
+			goto fre_out;
+		}
 
 		/* construct temp filename */
 		memcpy(idxfn, file, flen);
@@ -852,7 +856,6 @@ cots_open_ts(const char *file, int flags)
 	return (cots_ts_t)res;
 
 fre_out:
-	_free_wal(res->wal);
 	free(deconst(res->public.filename));
 	free(res);
 clo_out:

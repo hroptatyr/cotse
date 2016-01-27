@@ -98,9 +98,7 @@ _make_wal(size_t zrow, size_t blkz)
 void
 _free_wal(struct cots_wal_s *w)
 {
-	if (LIKELY(w != NULL)) {
-		munmap(w, _walz(w));
-	}
+	munmap(w, _walz(w));
 	return;
 }
 
