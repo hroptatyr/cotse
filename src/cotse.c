@@ -954,12 +954,11 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 
 	if (LIKELY(!st.st_size)) {
 		/* new file, yay, truncate to accomodate header and WAL */
-		off_t hz = _hdrz((struct _ss_s*)s);
-		off_t wz = _walz(((struct _ss_s*)s)->zrow, s->blockz);
-		/* calculate blocksize for header */
-		unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
+		const off_t hz = _hdrz((struct _ss_s*)s);
+		const off_t wz = _walz(((struct _ss_s*)s)->zrow, s->blockz);
+		const off_t fz = ALGN16(hz + 8U) - 8U;
 
-		if (UNLIKELY(ftruncate(fd, hz + wz) < 0)) {
+		if (UNLIKELY(ftruncate(fd, fz + wz) < 0)) {
 			goto clo_out;
 		}
 		/* map the header */
@@ -968,9 +967,12 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 			goto clo_out;
 		}
 		/* map the wal */
-		wal = mmap_any(fd, PROT_READ | PROT_WRITE, MAP_SHARED, hz, wz);
+		wal = mmap_any(fd, PROT_READ | PROT_WRITE, MAP_SHARED, fz, wz);
 		/* bang a basic header out */
 		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
+			/* calculate blocksize for header */
+			unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
+
 			/* keep track of block size */
 			proto.flags = htobe64(lgbz & 0xfU);
 
