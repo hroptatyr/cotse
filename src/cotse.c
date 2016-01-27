@@ -839,8 +839,9 @@ cots_open_ts(const char *file, int flags)
 
 		/* evacuate index */
 		while (so < st.st_size) {
-			ssize_t nsf = sendfile(ifd, res->fd, &so, st.st_size - so);
+			ssize_t nsf;
 
+			nsf = sendfile(ifd, res->fd, &so, st.st_size - so);
 			if (UNLIKELY(nsf <= 0)) {
 				/* oh great :| */
 				unlink(idxfn);
@@ -849,7 +850,7 @@ cots_open_ts(const char *file, int flags)
 		close(ifd);
 
 		/* truncate to size without index nor meta */
-		ftruncate(res->fd, res->fo);
+		(void)ftruncate(res->fd, res->fo);
 	}
 
 	/* use a backing file */
