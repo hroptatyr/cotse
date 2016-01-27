@@ -50,6 +50,7 @@
 #include <errno.h>
 #include "cotse.h"
 #include "index.h"
+#include "wal.h"
 #include "comp.h"
 #include "intern.h"
 #include "boobs.h"
@@ -70,8 +71,11 @@
 
 /* file header, mmapped for convenience */
 struct fhdr_s {
+	/* should be "cots" */
 	uint8_t magic[4U];
+	/* should be "v0" */
 	uint8_t version[2U];
+	/* COTS_ENDIAN written in native endian */
 	uint16_t endian;
 	/* tba
 	 * - lowest 4bits of flags is the log2 of the block size minus 9 */
@@ -98,15 +102,6 @@ struct chnk_s {
 	uint8_t type;
 };
 
-struct pbuf_s {
-	/* size of one row with alignment */
-	size_t zrow;
-	/* tick index */
-	size_t rowi;
-	/* data */
-	uint8_t *data;
-};
-
 struct _ss_s {
 	struct cots_ss_s public;
 
@@ -116,13 +111,10 @@ struct _ss_s {
 	/* compacted version of fields */
 	char *fields;
 
-	/* flags for bookkeeping and stuff */
-	struct {
-		unsigned int frozen:1;
-	};
-
-	/* row-oriented page buffer */
-	struct pbuf_s pb;
+	/* row-oriented page buffer, wal */
+	struct cots_wal_s *wal;
+	/* memory wal for swapsies */
+	struct cots_wal_s *mwal;
 
 	/* currently attached file and its opening flags */
 	int fd;
@@ -205,6 +197,18 @@ min_z(size_t x, size_t y)
 	return x < y ? x : y;
 }
 
+static inline __attribute__((const, pure)) size_t
+exp_lgbz(uint64_t b)
+{
+	return 1ULL << (b + 9U);
+}
+
+static inline __attribute__((const, pure)) uint64_t
+log_blkz(size_t b)
+{
+	return __builtin_ctz(b) - 9U;
+}
+
 static size_t
 _algn_zrow(const char *layout, size_t nflds)
 {
@@ -247,24 +251,9 @@ _algn_zrow(const char *layout, size_t nflds)
 	return z;
 }
 
-static inline struct pbuf_s
-_make_pbuf(size_t zrow, size_t blkz)
-{
-	void *data = calloc(blkz, zrow);
-	return (struct pbuf_s){zrow, 0U, data};
-}
-
-static inline void
-_free_pbuf(struct pbuf_s pb)
-{
-	if (LIKELY(pb.data != NULL)) {
-		free(pb.data);
-	}
-	return;
-}
-
+
 static struct blob_s
-_make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
+_make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 {
 #define Z(zrow, nrows)	(3U * (nrows) * (zrow) / 2U)
 	struct {
@@ -279,13 +268,13 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 	size_t bsz;
 	size_t z;
 
-	if (UNLIKELY(!(nrows = pb.rowi))) {
+	if (UNLIKELY(!(nrows = _wal_rowi(w)))) {
 		/* trivial */
 		return (struct blob_s){0U, NULL};
 	}
 
 	/* trial mmap */
-	bi = Z(pb.zrow, nrows > 64U ? nrows : 64U);
+	bi = Z(w->zrow, nrows > 64U ? nrows : 64U);
 	bsz = 2U * bi;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
@@ -294,8 +283,8 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 
 	/* columnarise times */
 	cols.proto.toffs = (void*)ALGN16(buf + bi + sizeof(z));
-	with (const cots_to_t *t = (const cots_to_t*)pb.data) {
-		const size_t acols = pb.zrow / sizeof(*t);
+	with (const cots_to_t *t = (const cots_to_t*)w->data) {
+		const size_t acols = w->zrow / sizeof(*t);
 
 		cols.from = t[0U];
 		for (size_t j = 0U; j < nrows; j++) {
@@ -317,8 +306,8 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 		case COTS_LO_PRC:
 		case COTS_LO_FLT: {
 			uint32_t *c = cols.cols[i];
-			const uint32_t *r = (const uint32_t*)(pb.data + a);
-			const size_t acols = pb.zrow / sizeof(*r);
+			const uint32_t *r = (const uint32_t*)(w->data + a);
+			const size_t acols = w->zrow / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
 				c[j] = r[j * acols];
@@ -333,8 +322,8 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 		case COTS_LO_QTY:
 		case COTS_LO_DBL: {
 			uint64_t *c = cols.cols[i];
-			const uint64_t *r = (const uint64_t*)(pb.data + a);
-			const size_t acols = pb.zrow / sizeof(*r);
+			const uint64_t *r = (const uint64_t*)(w->data + a);
+			const size_t acols = w->zrow / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
 				c[j] = r[j * acols];
@@ -357,6 +346,12 @@ _make_blob(const char *flds, size_t nflds, struct pbuf_s pb)
 		zn = htobe64(zn);
 		memcpy(buf, &zn, sizeof(zn));
 		z += sizeof(zn);
+	}
+	/* to traverse the file backwards, store the size and a crc24 */
+	with (uint64_t zc = (z << 24U) ^ (0U)) {
+		zc = htobe64(zc);
+		memcpy(buf + z, &zc, sizeof(zc));
+		z += sizeof(zc);
 	}
 
 	/* make the map a bit tinier */
@@ -389,17 +384,17 @@ _hdrz(const struct _ss_s *_s)
 	return sizeof(*_s->mdr) + nflds + 1U;
 }
 
-static inline cots_to_t
+static inline __attribute__((const)) cots_to_t
 _last_toff(const struct _ss_s *_s)
 {
 /* obtain the time-offset of the last kept tick */
-	const cots_to_t *const tp = (void*)_s->pb.data;
+	const cots_to_t *const tp = (void*)_s->wal->data;
+	const size_t zrow = _s->wal->zrow;
+	const size_t rowi = _wal_rowi(_s->wal);
 
-	if (UNLIKELY(!_s->pb.rowi)) {
-		return 0U;
-	}
-	/* otherwise we're lucky, apart from breaking the cache line */
-	return tp[_s->pb.rowi * _s->pb.zrow / sizeof(cots_to_t)];
+	/* assume the bang thing duped the last tick toff so
+	 * it's at position rowi */
+	return tp != NULL ? tp[rowi * zrow / sizeof(cots_to_t)] : -1ULL;
 }
 
 static ssize_t
@@ -540,11 +535,14 @@ _flush(struct _ss_s *_s)
 /* compact WAL and write contents to backing file */
 	const size_t nflds = _s->public.nfields;
 	const char *const layo = _s->public.layout;
+	size_t rowi;
 	struct blob_s b;
 	size_t mz;
 	int rc = 0;
 
-	if (UNLIKELY(!_s->pb.rowi)) {
+	if (UNLIKELY(_s->wal == NULL)) {
+		return 0;
+	} else if (UNLIKELY(!(rowi = _wal_rowi(_s->wal)))) {
 		return 0;
 	} else if (UNLIKELY(_s->fd < 0)) {
 		rc = -1;
@@ -552,15 +550,17 @@ _flush(struct _ss_s *_s)
 	}
 
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->pb);
+	b = _make_blob(layo, nflds, _s->wal);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
 		return -1;
 	}
 
-	size_t uncomp = _s->pb.rowi * 2U * sizeof(uint64_t) + _s->pb.zrow * _s->pb.rowi;
-	fprintf(stderr, "comp %zu  (%0.2f%%)\n", b.z, 100. * (double)b.z / (double)uncomp);
+	with (size_t uncomp = _s->wal->zrow * rowi) {
+		fprintf(stderr, "comp %zu  (%0.2f%%)\n",
+			b.z, 100. * (double)b.z / (double)uncomp);
+	}
 
 	/* manifest blob in file */
 	(void)lseek(_s->fd, _s->fo, SEEK_SET);
@@ -575,17 +575,17 @@ _flush(struct _ss_s *_s)
 			goto fre_out;
 		}
 	}
+	/* advance file offset and celebrate */
+	_s->fo += b.z;
+
 	/* add to index */
 	if (_s->idx) {
 		cots_add_index(
 			_s->idx,
 			(struct trng_s){b.from, b.till},
-			(struct orng_s){_s->fo, _s->fo + b.z},
-			_s->pb.rowi);
+			(struct orng_s){_s->fo - b.z, _s->fo},
+			rowi);
 	}
-
-	/* advance file offset and celebrate */
-	_s->fo += b.z;
 
 	/* put stuff like field names, obarray, etc. into the meta section
 	 * this will not update the FO */
@@ -597,7 +597,7 @@ _flush(struct _ss_s *_s)
 fre_out:
 	_free_blob(b);
 rst_out:
-	_s->pb.rowi = 0U;
+	_wal_rset(_s->wal);
 	return rc;
 }
 
@@ -676,7 +676,7 @@ make_cots_ts(const char *layout, size_t blockz)
 	}
 
 	/* make a page buffer (WAL) */
-	res->pb = _make_pbuf(zrow, blockz);
+	res->wal = _make_wal(zrow, blockz);
 
 	/* use a backing file? */
 	res->fd = -1;
@@ -689,23 +689,28 @@ make_cots_ts(const char *layout, size_t blockz)
 }
 
 void
-free_cots_ts(cots_ts_t ss)
+free_cots_ts(cots_ts_t s)
 {
-	struct _ss_s *_ss = (void*)ss;
+	struct _ss_s *_s = (void*)s;
 
-	cots_detach(ss);
-	if (LIKELY(_ss->public.layout != nul_layout)) {
-		free(deconst(_ss->public.layout));
+	cots_detach(s);
+	if (LIKELY(_s->public.layout != nul_layout)) {
+		free(deconst(_s->public.layout));
 	}
-	if (_ss->public.fields != NULL) {
-		free(deconst(_ss->public.fields));
-		free(_ss->fields);
+	if (_s->public.fields != NULL) {
+		free(deconst(_s->public.fields));
+		free(_s->fields);
 	}
-	_free_pbuf(_ss->pb);
-	if (_ss->ob != NULL) {
-		free_cots_ob(_ss->ob);
+	if (LIKELY(_s->wal != NULL)) {
+		_free_wal(_s->wal);
 	}
-	free(_ss);
+	if (UNLIKELY(_s->mwal != NULL)) {
+		_free_wal(_s->mwal);
+	}
+	if (_s->ob != NULL) {
+		free_cots_ob(_s->ob);
+	}
+	free(_s);
 	return;
 }
 
@@ -745,7 +750,7 @@ cots_open_ts(const char *file, int flags)
 	}
 	/* read block size */
 	with (uint64_t fl = be64toh(hdr.flags)) {
-		blkz = 1UL << ((fl & 0xfU) + 9U);
+		blkz = exp_lgbz(fl & 0xfU);
 	}
 	/* make backing file known */
 	res->public.filename = strdup(file);
@@ -779,10 +784,6 @@ cots_open_ts(const char *file, int flags)
 		memcpy(bzp, &blkz, sizeof(blkz));
 	}
 
-	/* get some scratch space for this one */
-	if (flags) {
-		res->pb = _make_pbuf(zrow, blkz);
-	}
 	/* map the header for reference */
 	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
 	if (UNLIKELY(res->mdr == NULL)) {
@@ -816,12 +817,47 @@ cots_open_ts(const char *file, int flags)
 		(void)munmap_any(m, moff, noff - moff);
 	}
 
+	/* get some scratch space and dissect the file parts */
+	if (flags/*O_RDWR*/) {
+		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
+		size_t flen = strlen(file);
+		/* for the temp file name */
+		char idxfn[flen + 5U];
+		int ifd;
+
+		/* get breathing space */
+		if (UNLIKELY((res->wal = _make_wal(zrow, blkz)) == NULL)) {
+			goto fre_out;
+		}
+
+		/* construct temp filename */
+		memcpy(idxfn, file, flen);
+		memcpy(idxfn + flen, ".idx", sizeof(".idx"));
+
+		/* check if exists first? */
+		ifd = open(idxfn, O_CREAT | O_TRUNC | O_RDWR, 0666);
+
+		/* evacuate index */
+		while (so < st.st_size) {
+			ssize_t nsf;
+
+			nsf = sendfile(ifd, res->fd, &so, st.st_size - so);
+			if (UNLIKELY(nsf <= 0)) {
+				/* oh great :| */
+				unlink(idxfn);
+			}
+		}
+		close(ifd);
+
+		/* truncate to size without index nor meta */
+		(void)ftruncate(res->fd, res->fo);
+	}
+
 	/* use a backing file */
 	return (cots_ts_t)res;
 
 fre_out:
 	free(deconst(res->public.filename));
-	free(res->pb.data);
 	free(res);
 clo_out:
 	save_errno {
@@ -864,21 +900,22 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 	}
 
 	if (LIKELY(!st.st_size)) {
-		/* new file, yay, truncate to accomodate header */
-		off_t hz = _hdrz((struct _ss_s*)s);
-		/* calculate blocksize for header */
-		unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
+		/* new file, yay, truncate to accomodate header and WAL */
+		const off_t hz = _hdrz((struct _ss_s*)s);
 
 		if (UNLIKELY(ftruncate(fd, hz) < 0)) {
 			goto clo_out;
 		}
 		/* map the header */
-		mdr = mmap_any(fd, PROT_WRITE, MAP_SHARED, 0, hz);
+		mdr = mmap_any(fd, PROT_READ | PROT_WRITE, MAP_SHARED, 0, hz);
 		if (UNLIKELY(mdr == NULL)) {
 			goto clo_out;
 		}
 		/* bang a basic header out */
-		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
+		with (struct fhdr_s proto = {"cots", "v0", COTS_ENDIAN}) {
+			/* calculate blocksize for header */
+			unsigned int lgbz = log_blkz(s->blockz);
+
 			/* keep track of block size */
 			proto.flags = htobe64(lgbz & 0xfU);
 
@@ -922,6 +959,10 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		/* store current index offs or file size as blob offs */
 		_s->fo = be64toh(mdr->moff) ?: st.st_size;
 		_s->ro = _hdrz(_s);
+
+		/* (re)attach the wal */
+		_s->mwal = _s->wal;
+		_s->wal = _wal_attach(_s->mwal, file);
 	}
 	return 0;
 
@@ -943,9 +984,18 @@ cots_detach(cots_ts_t s)
 
 	cots_freeze(s);
 
+	if (_s->wal && _wal_detach(_s->wal, _s->public.filename) < 0) {
+		/* great, just keep using the wal */
+		;
+	} else if (_s->wal) {
+		/* swap with spare wal */
+		_s->wal = _s->mwal;
+		_s->mwal = NULL;
+	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
 		free_cots_idx(_s->idx);
+		_s->idx = NULL;
 	}
 	if (_s->public.filename) {
 		free(deconst(_s->public.filename));
@@ -974,14 +1024,10 @@ cots_freeze(cots_ts_t s)
 	if (UNLIKELY(_s->fd < 0)) {
 		/* not on my watch */
 		return -1;
-	} else if (_s->frozen) {
-		return 0;
 	}
 
 	/* flush wal to file */
 	rc = _flush(_s);
-	/* set frozen flag */
-	_s->frozen = 1U;
 
 	if (_s->idx) {
 		/* this is bad coupling:
@@ -1004,8 +1050,8 @@ cots_bang_tick(cots_ts_t s, const struct cots_tick_s *data)
 		/* can't go back in time */
 		return -1;
 	}
-	/* otherwise bang */
-	memcpy(&_s->pb.data[_s->pb.rowi * _s->pb.zrow], data, _s->pb.zrow);
+	/* otherwise bang, this is a wal routine */
+	_wal_bang(_s->wal, data);
 	return 0;
 }
 
@@ -1016,7 +1062,7 @@ cots_keep_last(cots_ts_t s)
 	const size_t blkz = _s->public.blockz;
 	int rc = 0;
 
-	if (UNLIKELY(++_s->pb.rowi == blkz)) {
+	if (UNLIKELY(_wal_rinc(_s->wal) == blkz)) {
 		/* just for now */
 		if (!_s->idx) {
 			_s->idx = make_cots_idx(_s->public.filename);
@@ -1041,7 +1087,7 @@ cots_write_va(cots_ts_t s, cots_to_t t, ...)
 {
 	struct _ss_s *_s = (void*)s;
 	const char *flds = _s->public.layout;
-	uint8_t rp[_s->pb.zrow] __attribute__((aligned(16)));
+	uint8_t rp[_s->wal->zrow] __attribute__((aligned(16)));
 	va_list vap;
 
 	with (cots_to_t *tp = (void*)rp) {
@@ -1085,9 +1131,9 @@ cots_init_tsoa(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 {
 	const size_t blkz = s->blockz;
 	const size_t nflds = s->nfields;
-	struct pbuf_s rb = _make_pbuf(sizeof(uint64_t) * (nflds + 1U), blkz);
+	void *rb = calloc(sizeof(uint64_t) * (nflds + 1U), blkz);
 
-	if (UNLIKELY((tgt->toffs = (cots_to_t*)rb.data) == NULL)) {
+	if (UNLIKELY((tgt->toffs = (cots_to_t*)rb) == NULL)) {
 		return -1;
 	}
 	for (size_t i = 0U; i < nflds; i++) {
@@ -1151,6 +1197,18 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 		}
 
 		rz += sizeof(zn);
+
+		/* check footer */
+		with (uint64_t zc) {
+			memcpy(&zc, mp + rz, sizeof(zc));
+			zc = be64toh(zc);
+			if (zc >> 24U != rz) {
+				/* too late now innit? */
+				;
+			}
+
+			rz += sizeof(zc);
+		}
 	}
 
 	/* unmap */
