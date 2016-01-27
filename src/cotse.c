@@ -926,15 +926,25 @@ cots_open_ts(const char *file, int flags)
 
 	/* update header and stuff */
 	if (flags/*O_RDWR*/) {
-		const off_t moff = be64toh(res->mdr->moff);
 		const off_t noff = be64toh(res->mdr->noff);
-		const size_t metaz = moff < noff ? noff - moff : 0U;
+		off_t moff = be64toh(res->mdr->moff);
+		size_t metaz = moff < noff ? noff - moff : 0U;
 
-		(void)mprot_any(res->mdr, 0, _hdrz(res), PROT_MEM);
+		/* copy meta section to res->fo */
+		(void)lseek(res->fd, res->fo, SEEK_SET);
+		while (moff < noff) {
+			ssize_t nsf = sendfile(
+				res->fd, res->fd, &moff, noff - moff);
+			if (UNLIKELY(nsf <= 0)) {
+				metaz = 0U;
+				break;
+			}
+		}
+		/* truncate to size without index (but including meta) */
+		(void)ftruncate(res->fd, res->fo + metaz);
 
-		/* truncate to size without index nor meta */
-		(void)ftruncate(res->fd, res->fo);
 		/* update header */
+		(void)mprot_any(res->mdr, 0, _hdrz(res), PROT_MEM);
 		_updt_hdr(res, metaz);
 	}
 
