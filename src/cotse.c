@@ -118,6 +118,8 @@ struct _ss_s {
 
 	/* row-oriented page buffer, wal */
 	struct cots_wal_s *wal;
+	/* memory wal for swapsies */
+	struct cots_wal_s *mwal;
 
 	/* currently attached file and its opening flags */
 	int fd;
@@ -707,6 +709,9 @@ free_cots_ts(cots_ts_t s)
 	if (LIKELY(_s->wal != NULL)) {
 		_free_wal(_s->wal);
 	}
+	if (UNLIKELY(_s->mwal != NULL)) {
+		_free_wal(_s->mwal);
+	}
 	if (_s->ob != NULL) {
 		free_cots_ob(_s->ob);
 	}
@@ -961,11 +966,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		_s->ro = _hdrz(_s);
 
 		/* (re)attach the wal */
-		with (struct cots_wal_s *wal) {
-			wal = _wal_attach(_s->wal, file);
-			_free_wal(_s->wal);
-			_s->wal = wal;
-		}
+		_s->mwal = _s->wal;
+		_s->wal = _wal_attach(_s->mwal, file);
 	}
 	return 0;
 
@@ -987,12 +989,13 @@ cots_detach(cots_ts_t s)
 
 	cots_freeze(s);
 
-	if (_s->wal &&_wal_detach(_s->wal, _s->public.filename) < 0) {
+	if (_s->wal && _wal_detach(_s->wal, _s->public.filename) < 0) {
 		/* great, just keep using the wal */
 		;
 	} else if (_s->wal) {
-		/* no more using the WAL from now on */
-		_s->wal = NULL;
+		/* swap with spare wal */
+		_s->wal = _s->mwal;
+		_s->mwal = NULL;
 	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
