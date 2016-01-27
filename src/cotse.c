@@ -194,12 +194,22 @@ msync_any(void *map, off_t off, size_t len, int flags)
 }
 
 
-/* WAL (row-wise mapped buffer) handling */
-
 static inline __attribute__((pure, const)) size_t
 min_z(size_t x, size_t y)
 {
 	return x < y ? x : y;
+}
+
+static inline __attribute__((const, pure)) size_t
+exp_lgbz(uint64_t b)
+{
+	return (1ULL << b) + 9U;
+}
+
+static inline __attribute__((const, pure)) uint64_t
+log_blkz(size_t b)
+{
+	return __builtin_ctz(b) - 9U;
 }
 
 static size_t
@@ -738,7 +748,7 @@ cots_open_ts(const char *file, int flags)
 	}
 	/* read block size */
 	with (uint64_t fl = be64toh(hdr.flags)) {
-		blkz = 1UL << ((fl & 0xfU) + 9U);
+		blkz = exp_lgbz(fl & 0xfU);
 	}
 	/* make backing file known */
 	res->public.filename = strdup(file);
@@ -900,7 +910,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		/* bang a basic header out */
 		with (struct fhdr_s proto = {"cots", "v0", COTS_ENDIAN}) {
 			/* calculate blocksize for header */
-			unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
+			unsigned int lgbz = log_blkz(s->blockz);
 
 			/* keep track of block size */
 			proto.flags = htobe64(lgbz & 0xfU);
