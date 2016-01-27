@@ -50,6 +50,7 @@
 #include <errno.h>
 #include "cotse.h"
 #include "index.h"
+#include "wal.h"
 #include "comp.h"
 #include "intern.h"
 #include "boobs.h"
@@ -101,27 +102,6 @@ struct chnk_s {
 	uint8_t type;
 };
 
-/* disk representation of the WAL */
-struct wal_s {
-	/* header is the same as for beef pages,
-	 * the lowest 24bits are the row index
-	 * the size bits (the remaining 40bits) are 0
-	 * as opposed to beef pages this value is stored
-	 * in native endian and prefixed with \nul bytes
-	 * to align it 8 mod 16 */
-	uint64_t hdr;
-	/* the ordinary data, aligned on a 16 byte boundary
-	 * also at the end is the footer, a uint64_t with
-	 * the same semantics (and written in big-endian)
-	 * as the footer on beef pages
-	 * when the WAL is hot the footer value can be set
-	 * to 0x0000000000000000U
-	 * A client encountering that value is asked to
-	 * compute the WAL size itself (using the block
-	 * size and the inferred row size) */
-	uint8_t data[];
-};
-
 struct _ss_s {
 	struct cots_ss_s public;
 
@@ -136,11 +116,8 @@ struct _ss_s {
 		unsigned int frozen:1;
 	};
 
-	/* row-oriented page buffer */
-	/* size of one row with alignment */
-	size_t zrow;
-	/* wal */
-	struct wal_s *wal;
+	/* row-oriented page buffer, wal */
+	struct cots_wal_s *wal;
 
 	/* currently attached file and its opening flags */
 	int fd;
@@ -267,54 +244,9 @@ _algn_zrow(const char *layout, size_t nflds)
 	return z;
 }
 
-static inline __attribute__((const, pure)) size_t
-_walz(size_t zrow, size_t blkz)
-{
-	return blkz * zrow + sizeof(struct wal_s) + sizeof(uint64_t)/*ftr*/;
-}
-
-static inline struct wal_s*
-_make_wal(size_t zrow, size_t blkz)
-{
-	const size_t z = _walz(zrow, blkz);
-	struct wal_s *w = mmap(NULL, z, PROT_MEM, MAP_MEM, -1, 0);
-	return w != MAP_FAILED ? w : NULL;
-}
-
-static inline void
-_free_wal(struct wal_s *w, size_t zrow, size_t blkz)
-{
-	if (LIKELY(w != NULL)) {
-		const size_t z = _walz(zrow, blkz);
-		munmap(w, z);
-	}
-	return;
-}
-
-static inline __attribute__((const)) size_t
-_wal_rowi(const struct wal_s *w)
-{
-/* return row index in native form */
-	return w->hdr;
-}
-
-static inline void
-_wal_rset(struct wal_s *w)
-{
-/* reset row index */
-	w->hdr = 0U;
-	return;
-}
-
-static inline size_t
-_wal_rinc(struct wal_s *w)
-{
-	return ++w->hdr;
-}
-
 
 static struct blob_s
-_make_blob(const char *flds, size_t nflds, struct wal_s *w, size_t zrow)
+_make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 {
 #define Z(zrow, nrows)	(3U * (nrows) * (zrow) / 2U)
 	struct {
@@ -335,7 +267,7 @@ _make_blob(const char *flds, size_t nflds, struct wal_s *w, size_t zrow)
 	}
 
 	/* trial mmap */
-	bi = Z(zrow, nrows > 64U ? nrows : 64U);
+	bi = Z(w->zrow, nrows > 64U ? nrows : 64U);
 	bsz = 2U * bi;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
@@ -345,7 +277,7 @@ _make_blob(const char *flds, size_t nflds, struct wal_s *w, size_t zrow)
 	/* columnarise times */
 	cols.proto.toffs = (void*)ALGN16(buf + bi + sizeof(z));
 	with (const cots_to_t *t = (const cots_to_t*)w->data) {
-		const size_t acols = zrow / sizeof(*t);
+		const size_t acols = w->zrow / sizeof(*t);
 
 		cols.from = t[0U];
 		for (size_t j = 0U; j < nrows; j++) {
@@ -368,7 +300,7 @@ _make_blob(const char *flds, size_t nflds, struct wal_s *w, size_t zrow)
 		case COTS_LO_FLT: {
 			uint32_t *c = cols.cols[i];
 			const uint32_t *r = (const uint32_t*)(w->data + a);
-			const size_t acols = zrow / sizeof(*r);
+			const size_t acols = w->zrow / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
 				c[j] = r[j * acols];
@@ -384,7 +316,7 @@ _make_blob(const char *flds, size_t nflds, struct wal_s *w, size_t zrow)
 		case COTS_LO_DBL: {
 			uint64_t *c = cols.cols[i];
 			const uint64_t *r = (const uint64_t*)(w->data + a);
-			const size_t acols = zrow / sizeof(*r);
+			const size_t acols = w->zrow / sizeof(*r);
 
 			for (size_t j = 0U; j < nrows; j++) {
 				c[j] = r[j * acols];
@@ -450,11 +382,12 @@ _last_toff(const struct _ss_s *_s)
 {
 /* obtain the time-offset of the last kept tick */
 	const cots_to_t *const tp = (void*)_s->wal->data;
+	const size_t zrow = _s->wal->zrow;
 	const size_t rowi = _wal_rowi(_s->wal);
 
 	/* assume the bang thing duped the last tick toff so
 	 * it's at position rowi */
-	return tp != NULL ? tp[rowi * _s->zrow / sizeof(cots_to_t)] : -1ULL;
+	return tp != NULL ? tp[rowi * zrow / sizeof(cots_to_t)] : -1ULL;
 }
 
 static ssize_t
@@ -610,14 +543,14 @@ _flush(struct _ss_s *_s)
 	}
 
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->wal, _s->zrow);
+	b = _make_blob(layo, nflds, _s->wal);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
 		return -1;
 	}
 
-	with (size_t uncomp = _s->zrow * rowi) {
+	with (size_t uncomp = _s->wal->zrow * rowi) {
 		fprintf(stderr, "comp %zu  (%0.2f%%)\n",
 			b.z, 100. * (double)b.z / (double)uncomp);
 	}
@@ -736,7 +669,6 @@ make_cots_ts(const char *layout, size_t blockz)
 	}
 
 	/* make a page buffer (WAL) */
-	res->zrow = zrow;
 	res->wal = _make_wal(zrow, blockz);
 
 	/* use a backing file? */
@@ -762,7 +694,7 @@ free_cots_ts(cots_ts_t s)
 		free(deconst(_s->public.fields));
 		free(_s->fields);
 	}
-	_free_wal(_s->wal, _s->zrow, _s->public.blockz);
+	_free_wal(_s->wal);
 	if (_s->ob != NULL) {
 		free_cots_ob(_s->ob);
 	}
@@ -882,7 +814,6 @@ cots_open_ts(const char *file, int flags)
 		int ifd;
 
 		/* get breathing space */
-		res->zrow = zrow;
 		res->wal = _make_wal(zrow, blkz);
 
 		/* construct temp filename */
@@ -911,7 +842,7 @@ cots_open_ts(const char *file, int flags)
 	return (cots_ts_t)res;
 
 fre_out:
-	_free_wal(res->wal, zrow, blkz);
+	_free_wal(res->wal);
 	free(deconst(res->public.filename));
 	free(res);
 clo_out:
@@ -945,7 +876,6 @@ cots_attach(cots_ts_t s, const char *file, int flags)
  * 8.      x            x             x
  */
 	struct fhdr_s *mdr;
-	struct wal_s *wal;
 	struct stat st;
 	int fd;
 
@@ -958,10 +888,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 	if (LIKELY(!st.st_size)) {
 		/* new file, yay, truncate to accomodate header and WAL */
 		const off_t hz = _hdrz((struct _ss_s*)s);
-		const off_t wz = _walz(((struct _ss_s*)s)->zrow, s->blockz);
-		const off_t fz = ALGN16(hz + 8U) - 8U;
 
-		if (UNLIKELY(ftruncate(fd, fz + wz) < 0)) {
+		if (UNLIKELY(ftruncate(fd, hz) < 0)) {
 			goto clo_out;
 		}
 		/* map the header */
@@ -969,10 +897,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		if (UNLIKELY(mdr == NULL)) {
 			goto clo_out;
 		}
-		/* map the wal */
-		wal = mmap_any(fd, PROT_READ | PROT_WRITE, MAP_SHARED, fz, wz);
 		/* bang a basic header out */
-		with (struct fhdr_s proto = {"cots", "v0", 0x3c3eU}) {
+		with (struct fhdr_s proto = {"cots", "v0", COTS_ENDIAN}) {
 			/* calculate blocksize for header */
 			unsigned int lgbz = __builtin_ctz(s->blockz) - 9U;
 
@@ -1004,8 +930,6 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		}
 		/* yep they do, switch off write protection */
 		(void)mprot_any(mdr, 0, hz, PROT_WRITE);
-
-		wal = NULL;
 	}
 
 	/* we're good to go, detach any old files */
@@ -1022,12 +946,6 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		_s->fo = be64toh(mdr->moff) ?: st.st_size;
 		_s->ro = _hdrz(_s);
 
-		if (wal != NULL) {
-			/* copy wal */
-			off_t wz = _walz(_s->zrow, _s->public.blockz);
-			memcpy(wal, _s->wal, wz);
-			_free_wal(_s->wal, _s->zrow, _s->public.blockz);
-			_s->wal = wal;
 		}
 	}
 	return 0;
@@ -1106,14 +1024,13 @@ int
 cots_bang_tick(cots_ts_t s, const struct cots_tick_s *data)
 {
 	struct _ss_s *_s = (void*)s;
-	const size_t rowi = _wal_rowi(_s->wal);
 
 	if (UNLIKELY(data->toff < _last_toff(_s))) {
 		/* can't go back in time */
 		return -1;
 	}
-	/* otherwise bang, this is a wal routine, but whatever */
-	memcpy(_s->wal->data + rowi * _s->zrow, data, _s->zrow);
+	/* otherwise bang, this is a wal routine */
+	_wal_bang(_s->wal, data);
 	return 0;
 }
 
@@ -1149,7 +1066,7 @@ cots_write_va(cots_ts_t s, cots_to_t t, ...)
 {
 	struct _ss_s *_s = (void*)s;
 	const char *flds = _s->public.layout;
-	uint8_t rp[_s->zrow] __attribute__((aligned(16)));
+	uint8_t rp[_s->wal->zrow] __attribute__((aligned(16)));
 	va_list vap;
 
 	with (cots_to_t *tp = (void*)rp) {
