@@ -82,7 +82,7 @@ static inline void
 _wal_rset(struct cots_wal_s *w, size_t n)
 {
 /* reset row index */
-	w->rowi = n;
+	w->rowi = (n & (w->blkz - 1U));
 	return;
 }
 
