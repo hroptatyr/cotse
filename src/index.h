@@ -55,7 +55,6 @@ struct orng_s {
 
 
 extern cots_idx_t make_cots_idx(const char *fn);
-
 extern void free_cots_idx(cots_idx_t);
 
 extern int

@@ -79,10 +79,10 @@ _wal_rowi(const struct cots_wal_s *w)
 }
 
 static inline void
-_wal_rset(struct cots_wal_s *w)
+_wal_rset(struct cots_wal_s *w, size_t n)
 {
 /* reset row index */
-	w->rowi = 0U;
+	w->rowi = (n & (w->blkz - 1U));
 	return;
 }
 
@@ -93,11 +93,32 @@ _wal_rinc(struct cots_wal_s *w)
 }
 
 static inline void
-_wal_bang(struct cots_wal_s *w, const void *data)
+_wal_bang(struct cots_wal_s *restrict w, const void *data)
 {
 	register const size_t rowi = _wal_rowi(w);
 	register const size_t zrow = w->zrow;
 	memcpy(w->data + rowi * zrow, data, zrow);
+	return;
+}
+
+static inline void
+_wal_this(void *restrict data, const struct cots_wal_s *w)
+{
+/* return the tick at the current row index */
+	register const size_t rowi = _wal_rowi(w);
+	register const size_t zrow = w->zrow;
+	memcpy(data, w->data + rowi * zrow, zrow);
+	return;
+}
+
+static inline void
+_wal_last(void *restrict data, const struct cots_wal_s *w)
+{
+/* return the tick before the current row index */
+	register const size_t blkz = w->blkz - 1U;
+	register const size_t zrow = w->zrow;
+	register const size_t rowi = (_wal_rowi(w) - 1U) & blkz;
+	memcpy(data, w->data + rowi * zrow, zrow);
 	return;
 }
 

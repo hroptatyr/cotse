@@ -21,6 +21,8 @@ Red tape
 + releases: <https://github.com/hroptatyr/cotse/releases>
 + contributions: welcome
 
+This is Pareto software, i.e. only the 80% case works.
+
 
 Example
 -------

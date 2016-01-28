@@ -43,6 +43,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "cotse.h"
 #include "index.h"
 #include "nifty.h"
@@ -61,17 +63,23 @@ make_cots_idx(const char *filename)
 
 	if (UNLIKELY(filename == NULL)) {
 		goto nul_out;
-	} else if (UNLIKELY((res = make_cots_ts("cz", 512U)) == NULL)) {
-		goto nul_out;
 	}
 	/* construct temp filename */
 	with (size_t z = strlen(filename)) {
 		char idxfn[z + 5U];
 		const int idxfl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
+		struct stat st;
 
 		memcpy(idxfn, filename, z);
 		memcpy(idxfn + z, ".idx", sizeof(".idx"));
-		if (UNLIKELY(cots_attach(res, idxfn, idxfl) < 0)) {
+		if (stat(idxfn, &st) == 0) {
+			/* oooh index exists, does it? */
+			res = cots_open_ts(idxfn, O_RDWR);
+		} else if (UNLIKELY(errno != ENOENT)) {
+			goto nul_out;
+		} else if (UNLIKELY((res = make_cots_ts("cz", 512U)) == NULL)) {
+			goto nul_out;
+		} else if (UNLIKELY(cots_attach(res, idxfn, idxfl) < 0)) {
 			goto fre_out;
 		}
 	}

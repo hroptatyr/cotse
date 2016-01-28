@@ -377,6 +377,31 @@ _free_blob(struct blob_s b)
 	return;
 }
 
+static size_t
+_bang_tsoa(
+	uint8_t *restrict tgt,
+	const struct cots_tsoa_s *t, size_t nt,
+	const char *flds, size_t nflds)
+{
+	const size_t zrow = _algn_zrow(flds, nflds);
+
+	/* bang toffs */
+	for (size_t j = 0U; j < nt; j++) {
+		memcpy(tgt + j * zrow + 0U, t->toffs + j, sizeof(*t->toffs));
+	}
+	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+		uint8_t *cp = t->cols[i];
+
+		/* calculate next A value */
+		b = _algn_zrow(flds, i + 1U);
+		for (size_t j = 0U, wid = b - a; j < nt; j++) {
+			memcpy(tgt + j * zrow + a, cp + j * wid, wid);
+		}
+	}
+	return 0U;
+}
+
+
 static inline __attribute__((const)) size_t
 _hdrz(const struct _ss_s *_s)
 {
@@ -390,10 +415,11 @@ _last_toff(const struct _ss_s *_s)
 /* obtain the time-offset of the last kept tick */
 	const cots_to_t *const tp = (void*)_s->wal->data;
 	const size_t zrow = _s->wal->zrow;
-	const size_t rowi = _wal_rowi(_s->wal);
+	const size_t blkz = _s->wal->blkz - 1U;
+	const size_t rowi = (_wal_rowi(_s->wal) - 1U) & blkz;
 
-	/* assume the bang thing duped the last tick toff so
-	 * it's at position rowi */
+	/* this assumes the wal to be a ring buffer and/or
+	 * flush copying the last tick to the end of the buffer */
 	return tp != NULL ? tp[rowi * zrow / sizeof(cots_to_t)] : -1ULL;
 }
 
@@ -458,6 +484,8 @@ _wr_meta(const struct _ss_s *_s)
 {
 	size_t res = 0U;
 
+	/* just to be sure where we're writing things */
+	(void)lseek(_s->fd, _s->fo, SEEK_SET);
 	/* deal with them fields first */
 	if (_s->fields) {
 		const size_t nflds = _s->public.nfields;
@@ -596,8 +624,14 @@ _flush(struct _ss_s *_s)
 
 fre_out:
 	_free_blob(b);
+	/* keep last wal value */
+	with (uint64_t bak[nflds + 1U]) {
+		_wal_last(bak, _s->wal);
+		_wal_rset(_s->wal, -1ULL);
+		_wal_bang(_s->wal, bak);
+	}
 rst_out:
-	_wal_rset(_s->wal);
+	_wal_rset(_s->wal, 0U);
 	return rc;
 }
 
@@ -637,6 +671,47 @@ tru_out:
 	/* we can't do with failures, better reset this thing */
 	(void)ftruncate(_s->fd, fz);
 	return -1;
+}
+
+static ssize_t
+_rd_cpag(struct cots_tsoa_s *restrict tgt,
+	 const int fd, off_t *restrict o, const size_t z,
+	 const char *layo, size_t nflds)
+{
+	const uint8_t *p;
+	size_t nrows;
+	size_t rz;
+
+	p = mmap_any(fd, PROT_READ, MAP_SHARED, *o, z);
+	if (UNLIKELY(p == NULL)) {
+		/* don't bother updating offset either */
+		return -1;
+	}
+
+	/* quickly inspect integrity, well update RO more importantly */
+	with (uint64_t zn) {
+		size_t ntdcmp;
+
+		memcpy(&zn, p, sizeof(zn));
+		zn = be64toh(zn);
+
+		nrows = (zn & 0xffffffU) + 1U;
+		rz = zn >> 24U;
+
+		/* decompress */
+		ntdcmp = dcmp(tgt, nflds, nrows, layo, p + sizeof(zn), rz);
+		if (UNLIKELY(ntdcmp != nrows)) {
+			nrows = 0U;
+		}
+
+		rz += 2U * sizeof(zn);
+	}
+
+	/* unmap */
+	munmap_any(deconst(p), *o, z);
+	/* and update offset */
+	*o += rz;
+	return nrows;
 }
 
 
@@ -754,6 +829,7 @@ cots_open_ts(const char *file, int flags)
 	}
 	/* make backing file known */
 	res->public.filename = strdup(file);
+	/* snarf the layout and calculate zrow size */
 	{
 		size_t zlay = 8U, olay = 0U;
 		char *layo = malloc(8U);
@@ -814,48 +890,160 @@ cots_open_ts(const char *file, int flags)
 		/* try reading him */
 		(void)_rd_meta(res, m, noff - moff);
 
+		/* don't leave a trace */
 		(void)munmap_any(m, moff, noff - moff);
 	}
 
-	/* get some scratch space and dissect the file parts */
 	if (flags/*O_RDWR*/) {
-		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
-		size_t flen = strlen(file);
-		/* for the temp file name */
-		char idxfn[flen + 5U];
-		int ifd;
+		/* roll back last page into WAL */
+		const char *layo = res->public.layout;
+		off_t laso = res->fo - sizeof(uint64_t);
+		uint64_t lasz;
+		uint64_t xchk;
 
-		/* get breathing space */
-		if (UNLIKELY((res->wal = _make_wal(zrow, blkz)) == NULL)) {
+		if (UNLIKELY(laso > st.st_size ||
+			     laso < (off_t)sizeof(*res->mdr))) {
+			goto fre_out;
+		} else if (UNLIKELY(pread(res->fd, &lasz, sizeof(lasz), laso)
+				    < (ssize_t)sizeof(lasz))) {
+			goto fre_out;
+		}
+		lasz = be64toh(lasz);
+		lasz >>= 24U;
+		laso -= lasz;
+
+		/* cross check */
+		if (UNLIKELY(pread(res->fd, &xchk, sizeof(xchk), laso)
+			     < (ssize_t)sizeof(xchk))) {
+			/* nope */
+			goto fre_out;
+		}
+		/* deendianify */
+		xchk = be64toh(xchk);
+
+		if (UNLIKELY((xchk >> 24U) + sizeof(uint64_t) != lasz)) {
+			/* no idea what that was then */
 			goto fre_out;
 		}
 
-		/* construct temp filename */
-		memcpy(idxfn, file, flen);
-		memcpy(idxfn + flen, ".idx", sizeof(".idx"));
+		/* get some breathing space */
+		if (UNLIKELY((res->mwal = _make_wal(zrow, blkz)) == NULL)) {
+			goto fre_out;
+		}
+		/* attach file to wal */
+		res->wal = _wal_attach(res->mwal, file);
+		if (UNLIKELY(res->wal == NULL)) {
+			/* nah, don't bother */
+			goto wal_out;
+		}
 
-		/* check if exists first? */
-		ifd = open(idxfn, O_CREAT | O_TRUNC | O_RDWR, 0666);
+		/* check if page is non-full, if so read+decomp it */
+		if (LIKELY((xchk & 0xffffffU) + 1U < blkz)) {
+			struct {
+				union {
+					struct cots_tsoa_s t;
+					void *toffs;
+				};
+				void *flds[nflds];
+			} tgt;
+			off_t o = laso;
+			ssize_t nt;
 
-		/* evacuate index */
-		while (so < st.st_size) {
-			ssize_t nsf;
+			/* set up target with the mwal */
+			tgt.toffs = res->mwal->data;
+			for (size_t i = 0U; i < nflds; i++) {
+				const size_t a = _algn_zrow(layo, i);
+				tgt.flds[i] = res->mwal->data + a * blkz;
+			}
 
-			nsf = sendfile(ifd, res->fd, &so, st.st_size - so);
-			if (UNLIKELY(nsf <= 0)) {
-				/* oh great :| */
-				unlink(idxfn);
+			nt = _rd_cpag(&tgt.t, res->fd, &o, lasz, layo, nflds);
+			if (UNLIKELY(nt < 0)) {
+				goto wal_out;
+			}
+
+			/* wind back file offset, we'll truncate later */
+			res->fo = laso;
+
+			/* rowify wal */
+			_bang_tsoa(res->wal->data, &tgt.t, nt, layo, nflds);
+			/* increment to WAL to NT */
+			_wal_rset(res->wal, nt);
+		}
+	}
+
+	/* dissect the file parts */
+	if (flags/*O_RDWR*/) {
+		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
+		size_t flen = strlen(file);
+
+		if (so < st.st_size) {
+			/* for the temp file name */
+			char idxfn[flen + 5U];
+			const int idxfl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
+			int ifd;
+
+			/* construct temp filename */
+			memcpy(idxfn, file, flen);
+			memcpy(idxfn + flen, ".idx", sizeof(".idx"));
+
+			ifd = open(idxfn, idxfl, 0666);
+
+			/* copy index */
+			do {
+				ssize_t nsf;
+
+				nsf = sendfile(
+					ifd, res->fd, &so, st.st_size - so);
+				if (UNLIKELY(nsf <= 0)) {
+					/* oh great :| */
+					(void)ftruncate(ifd, 0);
+					(void)unlink(idxfn);
+					break;
+				}
+			} while (so < st.st_size);
+			/* finished, fingers crossed they wouldn't delete us */
+			close(ifd);
+
+			/* treat this as index */
+			if ((res->idx = make_cots_idx(file)) != NULL) {
+				/* again, terrible coupling but fiddle
+				 * with the index file's WAL seeing as
+				 * the last page need to be discarded
+				 * off there */
+				struct _ss_s *_idx = (void*)res->idx;
+				size_t n;
+
+				if (_idx->wal && (n = _wal_rowi(_idx->wal))) {
+					_wal_rset(_idx->wal, --n);
+				}
 			}
 		}
-		close(ifd);
+	}
 
-		/* truncate to size without index nor meta */
+	/* update header and stuff */
+	if (flags/*O_RDWR*/) {
+		size_t mz;
+
+		/* truncate to size without index or meta */
 		(void)ftruncate(res->fd, res->fo);
+		/* now then rewrite meta */
+		mz = _wr_meta(res);
+
+		/* update header, RACE */
+		(void)mprot_any(res->mdr, 0, _hdrz(res), PROT_MEM);
+		_updt_hdr(res, mz);
 	}
 
 	/* use a backing file */
 	return (cots_ts_t)res;
 
+wal_out:
+	if (res->mwal) {
+		_free_wal(res->mwal);
+	}
+	if (res->wal) {
+		_free_wal(res->mwal);
+	}
 fre_out:
 	free(deconst(res->public.filename));
 	free(res);
@@ -992,7 +1180,7 @@ cots_detach(cots_ts_t s)
 		_s->wal = _s->mwal;
 		_s->mwal = NULL;
 		/* assume flushed wal */
-		_wal_rset(_s->wal);
+		_wal_rset(_s->wal, 0U);
 	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
@@ -1162,10 +1350,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	const size_t blkz = _s->public.blockz;
 	const size_t nflds = _s->public.nfields;
 	const char *layo = _s->public.layout;
-	size_t nrows;
 	size_t mz;
-	uint8_t *mp;
-	size_t rz;
 
 	if (UNLIKELY(_s->ro >= _s->fo)) {
 		/* no recently added ticks, innit? */
@@ -1177,48 +1362,8 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 
 	/* guesstimate the page that needs mapping */
 	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
-	mp = mmap_any(_s->fd, PROT_READ, MAP_SHARED, _s->ro, mz);
-	if (UNLIKELY(mp == NULL)) {
-		return -1;
-	}
-
-	/* quickly inspect integrity, well update RO more importantly */
-	with (uint64_t zn) {
-		size_t ntdcmp;
-
-		memcpy(&zn, mp, sizeof(zn));
-		zn = be64toh(zn);
-
-		nrows = (zn & 0xffffffU) + 1U;
-		rz = zn >> 24U;
-
-		/* decompress */
-		ntdcmp = dcmp(tgt, nflds, nrows, layo, mp + sizeof(zn), rz);
-		if (UNLIKELY(ntdcmp != nrows)) {
-			nrows = 0U;
-		}
-
-		rz += sizeof(zn);
-
-		/* check footer */
-		with (uint64_t zc) {
-			memcpy(&zc, mp + rz, sizeof(zc));
-			zc = be64toh(zc);
-			if (zc >> 24U != rz) {
-				/* too late now innit? */
-				;
-			}
-
-			rz += sizeof(zc);
-		}
-	}
-
-	/* unmap */
-	munmap_any(mp, _s->ro, mz);
-
-	/* advance iterator */
-	_s->ro += rz;
-	return nrows;
+	/* and read/decomp the page */
+	return _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
 }
 
 
