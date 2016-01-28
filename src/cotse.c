@@ -639,6 +639,47 @@ tru_out:
 	return -1;
 }
 
+static ssize_t
+_rd_cpag(struct cots_tsoa_s *restrict tgt,
+	 const int fd, off_t *restrict o, const size_t z,
+	 const char *layo, size_t nflds)
+{
+	const uint8_t *p;
+	size_t nrows;
+	size_t rz;
+
+	p = mmap_any(fd, PROT_READ, MAP_SHARED, *o, z);
+	if (UNLIKELY(p == NULL)) {
+		/* don't bother updating offset either */
+		return -1;
+	}
+
+	/* quickly inspect integrity, well update RO more importantly */
+	with (uint64_t zn) {
+		size_t ntdcmp;
+
+		memcpy(&zn, p, sizeof(zn));
+		zn = be64toh(zn);
+
+		nrows = (zn & 0xffffffU) + 1U;
+		rz = zn >> 24U;
+
+		/* decompress */
+		ntdcmp = dcmp(tgt, nflds, nrows, layo, p + sizeof(zn), rz);
+		if (UNLIKELY(ntdcmp != nrows)) {
+			nrows = 0U;
+		}
+
+		rz += 2U * sizeof(zn);
+	}
+
+	/* unmap */
+	munmap_any(deconst(p), *o, z);
+	/* and update offset */
+	*o += rz;
+	return nrows;
+}
+
 
 /* public series storage API */
 cots_ts_t
@@ -1259,10 +1300,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	const size_t blkz = _s->public.blockz;
 	const size_t nflds = _s->public.nfields;
 	const char *layo = _s->public.layout;
-	size_t nrows;
 	size_t mz;
-	uint8_t *mp;
-	size_t rz;
 
 	if (UNLIKELY(_s->ro >= _s->fo)) {
 		/* no recently added ticks, innit? */
@@ -1274,48 +1312,8 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 
 	/* guesstimate the page that needs mapping */
 	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
-	mp = mmap_any(_s->fd, PROT_READ, MAP_SHARED, _s->ro, mz);
-	if (UNLIKELY(mp == NULL)) {
-		return -1;
-	}
-
-	/* quickly inspect integrity, well update RO more importantly */
-	with (uint64_t zn) {
-		size_t ntdcmp;
-
-		memcpy(&zn, mp, sizeof(zn));
-		zn = be64toh(zn);
-
-		nrows = (zn & 0xffffffU) + 1U;
-		rz = zn >> 24U;
-
-		/* decompress */
-		ntdcmp = dcmp(tgt, nflds, nrows, layo, mp + sizeof(zn), rz);
-		if (UNLIKELY(ntdcmp != nrows)) {
-			nrows = 0U;
-		}
-
-		rz += sizeof(zn);
-
-		/* check footer */
-		with (uint64_t zc) {
-			memcpy(&zc, mp + rz, sizeof(zc));
-			zc = be64toh(zc);
-			if (zc >> 24U != rz) {
-				/* too late now innit? */
-				;
-			}
-
-			rz += sizeof(zc);
-		}
-	}
-
-	/* unmap */
-	munmap_any(mp, _s->ro, mz);
-
-	/* advance iterator */
-	_s->ro += rz;
-	return nrows;
+	/* and read/decomp the page */
+	return _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
 }
 
 
