@@ -968,28 +968,38 @@ cots_open_ts(const char *file, int flags)
 	if (flags/*O_RDWR*/) {
 		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
 		size_t flen = strlen(file);
-		/* for the temp file name */
-		char idxfn[flen + 5U];
-		int ifd;
 
-		/* construct temp filename */
-		memcpy(idxfn, file, flen);
-		memcpy(idxfn + flen, ".idx", sizeof(".idx"));
+		if (so < st.st_size) {
+			/* for the temp file name */
+			char idxfn[flen + 5U];
+			const int idxfl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
+			int ifd;
 
-		/* check if exists first? */
-		ifd = open(idxfn, O_CREAT | O_TRUNC | O_RDWR, 0666);
+			/* construct temp filename */
+			memcpy(idxfn, file, flen);
+			memcpy(idxfn + flen, ".idx", sizeof(".idx"));
 
-		/* evacuate index */
-		while (so < st.st_size) {
-			ssize_t nsf;
+			ifd = open(idxfn, idxfl, 0666);
 
-			nsf = sendfile(ifd, res->fd, &so, st.st_size - so);
-			if (UNLIKELY(nsf <= 0)) {
-				/* oh great :| */
-				unlink(idxfn);
-			}
+			/* copy index */
+			do {
+				ssize_t nsf;
+
+				nsf = sendfile(
+					ifd, res->fd, &so, st.st_size - so);
+				if (UNLIKELY(nsf <= 0)) {
+					/* oh great :| */
+					(void)ftruncate(ifd, 0);
+					(void)unlink(idxfn);
+					break;
+				}
+			} while (so < st.st_size);
+			/* finished, fingers crossed they wouldn't delete us */
+			close(ifd);
+
+			/* treat this as index */
+			res->idx = make_cots_idx(file);
 		}
-		close(ifd);
 	}
 
 	/* update header and stuff */
