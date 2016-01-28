@@ -998,7 +998,18 @@ cots_open_ts(const char *file, int flags)
 			close(ifd);
 
 			/* treat this as index */
-			res->idx = make_cots_idx(file);
+			if ((res->idx = make_cots_idx(file)) != NULL) {
+				/* again, terrible coupling but fiddle
+				 * with the index file's WAL seeing as
+				 * the last page need to be discarded
+				 * off there */
+				struct _ss_s *_idx = (void*)res->idx;
+				size_t n;
+
+				if (_idx->wal && (n = _wal_rowi(_idx->wal))) {
+					_wal_rset(_idx->wal, --n);
+				}
+			}
 		}
 	}
 
