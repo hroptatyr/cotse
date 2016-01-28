@@ -483,6 +483,8 @@ _wr_meta(const struct _ss_s *_s)
 {
 	size_t res = 0U;
 
+	/* just to be sure where we're writing things */
+	(void)lseek(_s->fd, _s->fo, SEEK_SET);
 	/* deal with them fields first */
 	if (_s->fields) {
 		const size_t nflds = _s->public.nfields;
