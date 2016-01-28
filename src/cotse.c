@@ -994,26 +994,16 @@ cots_open_ts(const char *file, int flags)
 
 	/* update header and stuff */
 	if (flags/*O_RDWR*/) {
-		const off_t noff = be64toh(res->mdr->noff);
-		off_t moff = be64toh(res->mdr->moff);
-		size_t metaz = moff < noff ? noff - moff : 0U;
+		size_t mz;
 
-		/* copy meta section to res->fo */
-		(void)lseek(res->fd, res->fo, SEEK_SET);
-		while (moff < noff) {
-			ssize_t nsf = sendfile(
-				res->fd, res->fd, &moff, noff - moff);
-			if (UNLIKELY(nsf <= 0)) {
-				metaz = 0U;
-				break;
-			}
-		}
-		/* truncate to size without index (but including meta) */
-		(void)ftruncate(res->fd, res->fo + metaz);
+		/* truncate to size without index or meta */
+		(void)ftruncate(res->fd, res->fo);
+		/* now then rewrite meta */
+		mz = _wr_meta(res);
 
-		/* update header */
+		/* update header, RACE */
 		(void)mprot_any(res->mdr, 0, _hdrz(res), PROT_MEM);
-		_updt_hdr(res, metaz);
+		_updt_hdr(res, mz);
 	}
 
 	/* use a backing file */
