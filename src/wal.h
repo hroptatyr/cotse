@@ -79,10 +79,10 @@ _wal_rowi(const struct cots_wal_s *w)
 }
 
 static inline void
-_wal_rset(struct cots_wal_s *w)
+_wal_rset(struct cots_wal_s *w, size_t n)
 {
 /* reset row index */
-	w->rowi = 0U;
+	w->rowi = n;
 	return;
 }
 

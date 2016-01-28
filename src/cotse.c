@@ -622,7 +622,7 @@ _flush(struct _ss_s *_s)
 fre_out:
 	_free_blob(b);
 rst_out:
-	_wal_rset(_s->wal);
+	_wal_rset(_s->wal, 0U);
 	return rc;
 }
 
@@ -957,6 +957,8 @@ cots_open_ts(const char *file, int flags)
 
 			/* rowify wal */
 			_bang_tsoa(res->wal->data, &tgt.t, nt, layo, nflds);
+			/* increment to WAL to NT */
+			_wal_rset(res->wal, nt);
 		}
 	}
 
@@ -1158,7 +1160,7 @@ cots_detach(cots_ts_t s)
 		_s->wal = _s->mwal;
 		_s->mwal = NULL;
 		/* assume flushed wal */
-		_wal_rset(_s->wal);
+		_wal_rset(_s->wal, 0U);
 	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
