@@ -180,7 +180,9 @@ dump(cots_ts_t hdl, const struct cots_tsoa_s *cols, size_t n)
 				const char *s = cots_str(hdl, sp[i]);
 
 				*lp++ = '\t';
-				lp += xstrlcpy(lp, s, lz);
+				if (LIKELY(s != NULL)) {
+					lp += xstrlcpy(lp, s, lz);
+				}
 				break;
 			}
 
