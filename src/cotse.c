@@ -377,6 +377,31 @@ _free_blob(struct blob_s b)
 	return;
 }
 
+static size_t
+_bang_tsoa(
+	uint8_t *restrict tgt,
+	const struct cots_tsoa_s *t, size_t nt,
+	const char *flds, size_t nflds)
+{
+	const size_t zrow = _algn_zrow(flds, nflds);
+
+	/* bang toffs */
+	for (size_t j = 0U; j < nt; j++) {
+		memcpy(tgt + j * zrow + 0U, t->toffs + j, sizeof(*t->toffs));
+	}
+	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+		uint8_t *cp = t->cols[i];
+
+		/* calculate next A value */
+		b = _algn_zrow(flds, i + 1U);
+		for (size_t j = 0U, wid = b - a; j < nt; j++) {
+			memcpy(tgt + j * zrow + a, cp + j * wid, wid);
+		}
+	}
+	return 0U;
+}
+
+
 static inline __attribute__((const)) size_t
 _hdrz(const struct _ss_s *_s)
 {
@@ -896,30 +921,43 @@ cots_open_ts(const char *file, int flags)
 		if (UNLIKELY((res->mwal = _make_wal(zrow, blkz)) == NULL)) {
 			goto fre_out;
 		}
+		/* attach file to wal */
+		res->wal = _wal_attach(res->mwal, file);
+		if (UNLIKELY(res->wal == NULL)) {
+			/* nah, don't bother */
+			goto wal_out;
+		}
 
 		/* check if page is non-full, if so read+decomp it */
 		if (LIKELY((xchk & 0xffffffU) + 1U < blkz)) {
-			void *tgt[nflds + 1U];
+			struct {
+				union {
+					struct cots_tsoa_s t;
+					void *toffs;
+				};
+				void *flds[nflds];
+			} tgt;
 			off_t o = laso;
+			ssize_t nt;
 
 			/* set up target with the mwal */
-			tgt[0U] = res->mwal->data;
-			for (size_t i = 1U; i <= nflds; i++) {
-				const size_t a = _algn_zrow(layo, i - 1U);
-				tgt[i] = res->mwal->data + a * blkz;
+			tgt.toffs = res->mwal->data;
+			for (size_t i = 0U; i < nflds; i++) {
+				const size_t a = _algn_zrow(layo, i);
+				tgt.flds[i] = res->mwal->data + a * blkz;
 			}
 
-			if (UNLIKELY(_rd_cpag((void*)tgt, res->fd, &o, lasz,
-					      layo, nflds) < 0)) {
+			nt = _rd_cpag(&tgt.t, res->fd, &o, lasz, layo, nflds);
+			if (UNLIKELY(nt < 0)) {
 				goto wal_out;
 			}
 
 			/* wind back file offset, we'll truncate later */
 			res->fo = laso;
-		}
 
-		/* attach file to wal */
-		res->wal = _wal_attach(res->mwal, file);
+			/* rowify wal */
+			_bang_tsoa(res->wal->data, &tgt.t, nt, layo, nflds);
+		}
 	}
 
 	/* dissect the file parts */
@@ -978,7 +1016,12 @@ cots_open_ts(const char *file, int flags)
 	return (cots_ts_t)res;
 
 wal_out:
-	_free_wal(res->mwal);
+	if (res->mwal) {
+		_free_wal(res->mwal);
+	}
+	if (res->wal) {
+		_free_wal(res->mwal);
+	}
 fre_out:
 	free(deconst(res->public.filename));
 	free(res);
