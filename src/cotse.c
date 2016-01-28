@@ -415,10 +415,11 @@ _last_toff(const struct _ss_s *_s)
 /* obtain the time-offset of the last kept tick */
 	const cots_to_t *const tp = (void*)_s->wal->data;
 	const size_t zrow = _s->wal->zrow;
-	const size_t rowi = _wal_rowi(_s->wal);
+	const size_t blkz = _s->wal->blkz - 1U;
+	const size_t rowi = (_wal_rowi(_s->wal) - 1U) & blkz;
 
-	/* assume the bang thing duped the last tick toff so
-	 * it's at position rowi */
+	/* this assumes the wal to be a ring buffer and/or
+	 * flush copying the last tick to the end of the buffer */
 	return tp != NULL ? tp[rowi * zrow / sizeof(cots_to_t)] : -1ULL;
 }
 
