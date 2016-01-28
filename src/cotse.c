@@ -624,6 +624,12 @@ _flush(struct _ss_s *_s)
 
 fre_out:
 	_free_blob(b);
+	/* keep last wal value */
+	with (uint64_t bak[nflds + 1U]) {
+		_wal_last(bak, _s->wal);
+		_wal_rset(_s->wal, -1ULL);
+		_wal_bang(_s->wal, bak);
+	}
 rst_out:
 	_wal_rset(_s->wal, 0U);
 	return rc;
