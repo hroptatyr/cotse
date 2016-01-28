@@ -93,11 +93,20 @@ _wal_rinc(struct cots_wal_s *w)
 }
 
 static inline void
-_wal_bang(struct cots_wal_s *w, const void *data)
+_wal_bang(struct cots_wal_s *restrict w, const void *data)
 {
 	register const size_t rowi = _wal_rowi(w);
 	register const size_t zrow = w->zrow;
 	memcpy(w->data + rowi * zrow, data, zrow);
+	return;
+}
+
+static inline void
+_wal_last(void *restrict data, const struct cots_wal_s *w)
+{
+	register const size_t rowi = _wal_rowi(w);
+	register const size_t zrow = w->zrow;
+	memcpy(data, w->data + rowi * zrow, zrow);
 	return;
 }
 
