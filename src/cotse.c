@@ -897,18 +897,10 @@ cots_open_ts(const char *file, int flags)
 			goto fre_out;
 		}
 
+		/* check if page is non-full, if so read+decomp it */
 		if (LIKELY((xchk & 0xffffffU) + 1U < blkz)) {
-			const size_t nrows = (xchk & 0xffffffU) + 1U;
-			uint8_t *mp = mmap_any(
-				res->fd, PROT_READ, MAP_SHARED, laso, lasz);
-			size_t ntdcmp;
 			void *tgt[nflds + 1U];
-
-			if (UNLIKELY(mp == NULL)) {
-				goto wal_out;
-			}
-
-			printf("%zu %zu\n", zrow, blkz);
+			off_t o = laso;
 
 			/* set up target with the mwal */
 			tgt[0U] = res->mwal->data;
@@ -916,18 +908,11 @@ cots_open_ts(const char *file, int flags)
 				const size_t a = _algn_zrow(layo, i - 1U);
 				tgt[i] = res->mwal->data + a * blkz;
 			}
-			fflush(stdout);
 
-			/* decompress */
-			ntdcmp = dcmp(
-				(struct cots_tsoa_s*)tgt, nflds, nrows, layo,
-				mp + sizeof(xchk), lasz - sizeof(xchk));
-			if (UNLIKELY(ntdcmp != nrows)) {
+			if (UNLIKELY(_rd_cpag((void*)tgt, res->fd, &o, lasz,
+					      layo, nflds) < 0)) {
 				goto wal_out;
 			}
-
-			/* unmap */
-			munmap_any(mp, laso, lasz);
 
 			/* wind back file offset, we'll truncate later */
 			res->fo = laso;
