@@ -38,8 +38,8 @@ To write some data to a file-backed tick store:
     };
     ...
     struct candle data;
-    cots_ts_t db = make_cots_ts("ppppq");
-    cots_put_fields(db, (const char*){"open","high","low","close","volume"});
+    cots_ts_t db = make_cots_ts("ppppq", 0U);
+    cots_put_fields(db, (const char*[]){"open","high","low","close","volume"});
     cots_attach(db, "/tmp/tickdata", O_CREAT | O_TRUNC | O_RDWR);
     while (get_candle(&data)) {
     	cots_write_tick(db, &data.proto);

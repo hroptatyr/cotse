@@ -18,8 +18,8 @@ For in-memory databases:
     };
     ...
     struct candle data;
-    cots_ts_t db = make_cots_ts("ppppq");
-    cots_put_fields(db, (const char*){"open","high","low","close","volume"});
+    cots_ts_t db = make_cots_ts("ppppq", 0U);
+    cots_put_fields(db, (const char*[]){"open","high","low","close","volume"});
     while (get_candle(&data)) {
     	cots_write_tick(db, &data.proto);
     }
