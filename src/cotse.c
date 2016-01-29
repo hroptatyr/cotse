@@ -544,13 +544,37 @@ tru_out:
 }
 
 static int
-_rd_meta(struct _ss_s *restrict _s, const uint8_t *blob, size_t bloz)
+_rd_meta(struct _ss_s *restrict _s)
 {
 	struct chnk_s c;
+	size_t mz;
+	uint8_t *m;
 
-	for (size_t bi = 0U;
-	     bi < bloz && (c = _rd_meta_chnk(blob + bi, bloz - bi)).data;
-	     bi = c.data + c.z - blob) {
+	if (UNLIKELY(_s->fd < 0)) {
+		/* not doing no-disk-backed shit */
+		return -1;
+	} else if (UNLIKELY(_s->mdr == NULL)) {
+		/* someone forgot to map the header */
+		return -1;
+	}
+
+	const off_t moff = be64toh(_s->mdr->moff);
+	const off_t noff = be64toh(_s->mdr->noff);
+
+	if (UNLIKELY(moff >= noff)) {
+		/* file must be fuckered */
+		return -1;
+	}
+	/* try mapping him */
+	m = mmap_any(_s->fd, PROT_READ, MAP_SHARED, moff, mz = noff - moff);
+	if (UNLIKELY(m == NULL)) {
+		/* it's no good */
+		return -1;
+	}
+	/* try reading him */
+	for (size_t mi = 0U;
+	     mi < mz && (c = _rd_meta_chnk(m + mi, mz - mi)).data;
+	     mi = c.data + c.z - m) {
 		/* only handle chunks with known types */
 		switch (c.type) {
 		case 'F':
@@ -573,6 +597,9 @@ _rd_meta(struct _ss_s *restrict _s, const uint8_t *blob, size_t bloz)
 			break;
 		}
 	}
+
+	/* don't leave a trace */
+	(void)munmap_any(m, moff, noff - moff);
 	return (c.data != NULL) - 1;
 }
 
@@ -916,26 +943,7 @@ cots_open_ts(const char *file, int flags)
 	res->ro = _hdrz(res);
 
 	/* short dip into the meta pool */
-	with (off_t noff = be64toh(res->mdr->noff)) {
-		off_t moff = res->fo;
-		uint8_t *m;
-
-		if (moff >= noff) {
-			/* not for us this isn't */
-			break;
-		}
-		/* try mapping him */
-		m = mmap_any(fd, PROT_READ, MAP_SHARED, moff, noff - moff);
-		if (UNLIKELY(m == NULL)) {
-			/* it's no good */
-			break;
-		}
-		/* try reading him */
-		(void)_rd_meta(res, m, noff - moff);
-
-		/* don't leave a trace */
-		(void)munmap_any(m, moff, noff - moff);
-	}
+	(void)_rd_meta(res);
 
 	if (flags/*O_RDWR*/) {
 		/* roll back last page into WAL */
