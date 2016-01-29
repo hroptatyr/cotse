@@ -15,7 +15,7 @@ Features
 Red tape
 --------
 
-+ licence: [BSD3c][2]
++ licence: [BSD3c][1]
 + github: <https://github.com/hroptatyr/cotse>
 + issues: <https://github.com/hroptatyr/cotse/issues>
 + releases: <https://github.com/hroptatyr/cotse/releases>
@@ -65,3 +65,6 @@ And to read the contents:
     	put_candle(&dsoa);
     };
     cots_close_ts(db);
+
+
+  [1]: http://tldrlegal.com/license/bsd-3-clause-license-%28revised%29
