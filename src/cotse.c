@@ -714,6 +714,40 @@ _rd_cpag(struct cots_tsoa_s *restrict tgt,
 	return nrows;
 }
 
+static size_t
+_rd_layo(const char **layo, int fd)
+{
+	size_t lz, li = 0U;
+	char *lp;
+
+	/* start out with a conservative 7 fields */
+	if (UNLIKELY((lp = malloc(lz = 8U)) == NULL)) {
+		return 0U;
+	}
+	while (1) {
+		ssize_t nrd = read(fd, lp + li, lz - li);
+		const char *eo;
+
+		if (UNLIKELY(nrd <= 0)) {
+			/* no luck whatsoever */
+			goto nul_out;
+		} else if ((eo = memchr(lp + li, '\0', nrd)) != NULL) {
+			li = eo - lp;
+			break;
+		}
+		/* otherwise double in size and retry */
+		li += nrd;
+		lp = realloc(lp, lz *= 2U);
+	}
+	/* very good, count and assign */
+	*layo = lp;
+	return li;
+
+nul_out:
+	free(lp);
+	return 0U;
+}
+
 
 /* public series storage API */
 cots_ts_t
@@ -830,26 +864,16 @@ cots_open_ts(const char *file, int flags)
 	/* make backing file known */
 	res->public.filename = strdup(file);
 	/* snarf the layout and calculate zrow size */
-	{
-		size_t zlay = 8U, olay = 0U;
-		char *layo = malloc(8U);
-		char *eo;
-
-		while (1) {
-			read(fd, layo + olay, zlay);
-			if ((eo = memchr(layo + olay, '\0', zlay)) != NULL) {
-				break;
-			}
-			/* otherwise double in size and retry */
-			olay = zlay;
-			layo = realloc(layo, zlay * 2U);
+	with (const char *layo = NULL) {
+		nflds = _rd_layo(&layo, fd);
+		if (layo != NULL) {
+			/* keep for reference */
+			res->public.layout = layo;
+			/* determine algiend size */
+			zrow = _algn_zrow(layo, nflds);
 		}
-		res->public.layout = layo;
-		/* determine nflds */
-		nflds = eo - layo;
-		/* determine aligned size */
-		zrow = _algn_zrow(layo, nflds);
 	}
+
 
 	/* make number of fields known publicly */
 	with (void *nfp = deconst(&res->public.nfields)) {
