@@ -252,10 +252,94 @@ _algn_zrow(const char *layout, size_t nflds)
 }
 
 
+static int
+_bang_tsoa(
+	uint8_t *restrict rows,
+	const struct cots_tsoa_s *cols, size_t nrows,
+	const char *flds, size_t nflds)
+{
+/* rowify NROWS values in COLS into ROWS according to FLDS */
+	const size_t zrow = _algn_zrow(flds, nflds);
+
+	/* bang toffs */
+	for (size_t j = 0U; j < nrows; j++) {
+		memcpy(rows + j * zrow + 0U,
+		       cols->toffs + j, sizeof(*cols->toffs));
+	}
+	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+		uint8_t *cp = cols->cols[i];
+
+		/* calculate next A value */
+		b = _algn_zrow(flds, i + 1U);
+		for (size_t j = 0U, wid = b - a; j < nrows; j++) {
+			memcpy(rows + j * zrow + a, cp + j * wid, wid);
+		}
+	}
+	return 0;
+}
+
+static int
+_bang_tick(
+	struct cots_tsoa_s *restrict cols,
+	const uint8_t *rows, size_t nrows,
+	const char *flds, size_t nflds)
+{
+/* columnarise NROWS values in ROWS into COLS accordings to FLDS */
+	const size_t zrow = _algn_zrow(flds, nflds);
+
+	/* columnarise times */
+	with (const cots_to_t *t = (const cots_to_t*)rows) {
+		const size_t acols = zrow / sizeof(*t);
+
+		for (size_t j = 0U; j < nrows; j++) {
+			cols->toffs[j] = t[j * acols];
+		}
+	}
+
+	/* columnarise the rest */
+	for (size_t i = 0U; i < nflds; i++) {
+		/* next one is a bit of a Schlemiel, we could technically
+		 * iteratively compute A, much like _algn_zrow() does it,
+		 * but this way it saves us some explaining */
+		const size_t a = _algn_zrow(flds, i);
+
+		switch (flds[i]) {
+		case COTS_LO_PRC:
+		case COTS_LO_FLT: {
+			uint32_t *c = cols->cols[i];
+			const uint32_t *r = (const uint32_t*)(rows + a);
+			const size_t acols = zrow / sizeof(*r);
+
+			for (size_t j = 0U; j < nrows; j++) {
+				c[j] = r[j * acols];
+			}
+			break;
+		}
+		case COTS_LO_TIM:
+		case COTS_LO_CNT:
+		case COTS_LO_STR:
+		case COTS_LO_SIZ:
+		case COTS_LO_QTY:
+		case COTS_LO_DBL: {
+			uint64_t *c = cols->cols[i];
+			const uint64_t *r = (const uint64_t*)(rows + a);
+			const size_t acols = zrow / sizeof(*r);
+
+			for (size_t j = 0U; j < nrows; j++) {
+				c[j] = r[j * acols];
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	return 0;
+}
+
 static struct blob_s
 _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 {
-#define Z(zrow, nrows)	(3U * (nrows) * (zrow) / 2U)
 	struct {
 		struct cots_tsoa_s proto;
 		void *cols[nflds];
@@ -273,68 +357,28 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 		return (struct blob_s){0U, NULL};
 	}
 
-	/* trial mmap */
-	bi = Z(w->zrow, nrows > 64U ? nrows : 64U);
+	/* trial mmap, fair estimate would be to use nrows * nflds * uint64_t
+	 * and then time 2 for the compressed data as well */
+	bi = sizeof(uint64_t) * (nflds + 1U) * (nrows > 64U ? nrows : 64U);
 	bsz = 2U * bi;
 	buf = mmap(NULL, bsz, PROT_MEM, MAP_MEM, -1, 0);
 	if (buf == MAP_FAILED) {
 		return (struct blob_s){0U, NULL};
 	}
 
-	/* columnarise times */
-	cols.proto.toffs = (void*)ALGN16(buf + bi + sizeof(z));
-	with (const cots_to_t *t = (const cots_to_t*)w->data) {
-		const size_t acols = w->zrow / sizeof(*t);
-
-		cols.from = t[0U];
-		for (size_t j = 0U; j < nrows; j++) {
-			cols.proto.toffs[j] = t[j * acols];
-		}
-		cols.till = cols.proto.toffs[nrows - 1U];
-		bi += Z(sizeof(cots_to_t), nrows);
-	}
-
-	/* columnarise */
+	/* prepare the tsoa */
+	cols.proto.toffs = (void*)ALGN16(buf + bi);
+	/* now for the rest */
 	for (size_t i = 0U; i < nflds; i++) {
-		/* next one is a bit of a Schlemiel, we could technically
-		 * iteratively compute A, much like _algn_zrow() does it,
-		 * but this way it saves us some explaining */
-		const size_t a = _algn_zrow(flds, i);
-		cols.cols[i] = (void*)ALGN16(buf + bi + sizeof(z));
-
-		switch (flds[i]) {
-		case COTS_LO_PRC:
-		case COTS_LO_FLT: {
-			uint32_t *c = cols.cols[i];
-			const uint32_t *r = (const uint32_t*)(w->data + a);
-			const size_t acols = w->zrow / sizeof(*r);
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = r[j * acols];
-			}
-			bi += Z(sizeof(*c), nrows);
-			break;
-		}
-		case COTS_LO_TIM:
-		case COTS_LO_CNT:
-		case COTS_LO_STR:
-		case COTS_LO_SIZ:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL: {
-			uint64_t *c = cols.cols[i];
-			const uint64_t *r = (const uint64_t*)(w->data + a);
-			const size_t acols = w->zrow / sizeof(*r);
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = r[j * acols];
-			}
-			bi += Z(sizeof(*c), nrows);
-			break;
-		}
-		default:
-			break;
-		}
+		bi += nrows * sizeof(uint64_t);
+		cols.cols[i] = (void*)ALGN16(buf + bi);
 	}
+	/* call the columnifier */
+	_bang_tick(&cols.proto, w->data, nrows, flds, nflds);
+
+	/* get from and till values */
+	cols.from = cols.proto.toffs[0U];
+	cols.till = cols.proto.toffs[nrows - 1U];
 
 	/* call the compactor */
 	z = comp(buf + sizeof(z), nflds, nrows, flds, &cols.proto);
@@ -367,7 +411,6 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 mun_out:
 	munmap(buf, bsz);
 	return (struct blob_s){0U, NULL};
-#undef Z
 }
 
 static void
@@ -375,30 +418,6 @@ _free_blob(struct blob_s b)
 {
 	munmap_any(b.data, 0U, b.z);
 	return;
-}
-
-static size_t
-_bang_tsoa(
-	uint8_t *restrict tgt,
-	const struct cots_tsoa_s *t, size_t nt,
-	const char *flds, size_t nflds)
-{
-	const size_t zrow = _algn_zrow(flds, nflds);
-
-	/* bang toffs */
-	for (size_t j = 0U; j < nt; j++) {
-		memcpy(tgt + j * zrow + 0U, t->toffs + j, sizeof(*t->toffs));
-	}
-	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
-		uint8_t *cp = t->cols[i];
-
-		/* calculate next A value */
-		b = _algn_zrow(flds, i + 1U);
-		for (size_t j = 0U, wid = b - a; j < nt; j++) {
-			memcpy(tgt + j * zrow + a, cp + j * wid, wid);
-		}
-	}
-	return 0U;
 }
 
 
