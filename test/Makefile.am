@@ -39,4 +39,7 @@ TESTS += creat_01.clit
 check_PROGRAMS += creat_02
 TESTS += creat_02.clit
 
+check_PROGRAMS += open_twice_01
+TESTS += open_twice_01.clit
+
 ## Makefile.am ends here
