@@ -1,6 +1,7 @@
 #!/usr/bin/clitoris
 
-$ cotsdump creat_01
+$ creat_01
+$ cotsdump creat_01.cots
 TIME	bidq	bidp
 1.073928234	10	405.7700
 1.073928256	1	405.5801
@@ -58,4 +59,5 @@ TIME	bidq	bidp
 1.073931728	260	404.5400
 1.073931774	2101	404.5000
 1.073931774	2100	404.5000
+$ rm creat_01.cots
 $

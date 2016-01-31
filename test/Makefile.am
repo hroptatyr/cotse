@@ -34,11 +34,9 @@ TESTS_ENVIRONMENT = root=$(top_srcdir)
 
 
 check_PROGRAMS += creat_01
-TESTS += creat_01
 TESTS += creat_01.clit
 
 check_PROGRAMS += creat_02
-TESTS += creat_02
 TESTS += creat_02.clit
 
 .NOTPARALLEL:
