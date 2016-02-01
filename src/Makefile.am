@@ -39,6 +39,7 @@ libcotse_la_SOURCES += hash.c hash.h
 libcotse_la_SOURCES += intern.c intern.h
 libcotse_la_CPPFLAGS = $(AM_CPPFLAGS)
 libcotse_la_CPPFLAGS += -D_GNU_SOURCE
+libcotse_la_LIBADD = -lm
 
 noinst_PROGRAMS += cotsdump
 cotsdump_SOURCES = cotsdump.c
