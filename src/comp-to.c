@@ -60,17 +60,20 @@ avgt(const cots_to_t *t, size_t nt)
 		k += t[i] != 0U;
 	}
 	sum = exp10(sum / (double)k);
-	return lrint(sum) & ~1ULL;
+	return lrint(sum);
 }
 
-static void
+static unsigned int
 delt(cots_to_t *restrict tgt, const cots_to_t *restrict src, size_t nt)
 {
-	tgt[0U] = src[0U] & ~1ULL;
+/* return logior of LSB */
+	unsigned int lor = 0U;
+	tgt[0U] = src[0U];
 	for (size_t i = 1U; i < nt; i++) {
-		tgt[i] = (src[i] & ~1ULL) - (src[i - 1U] & ~1ULL);
+		tgt[i] = src[i] - src[i - 1U];
+		lor |= tgt[i] & 0b1U;
 	}
-	return;
+	return lor;
 }
 
 static void
@@ -83,23 +86,24 @@ sumt(cots_to_t *restrict io, size_t nt)
 }
 
 static void
-rmavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg)
+rmavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg, unsigned int sh)
 {
 	for (size_t i = 0U; i < nt; i++) {
-		long int x = io[i] ? (io[i] - avg) : 0;
+		long int x = io[i] - avg;
 		/* and zig-zag encode him */
-		io[i] = ((x << 1U) ^ (x >> 63)) ^ (io[i] == 0);
+		io[i] = io[i] ? (((x << 1U) ^ (x >> 63U)) << sh) : 1U;
 	}
 	return;
 }
 
 static void
-adavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg)
+adavgt(cots_to_t *restrict io, size_t nt, cots_to_t avg, unsigned int sh)
 {
 	for (size_t i = 0U; i < nt; i++) {
+		cots_to_t rio = io[i] >> sh;
 		/* zig-zag decode him */
-		long int x = (io[i] >> 1U) ^ (-(io[i] & 0b1U));
-		io[i] = x + 1 ? x + avg : 0U;
+		long int x = (rio >> 1U) ^ (-(rio & 0b1U));
+		io[i] = (io[i] ^ 1U) ? avg + x : 0U;
 	}
 	return;
 }
@@ -109,17 +113,21 @@ _comp(uint8_t *restrict tgt, const cots_to_t *restrict to, size_t nt)
 {
 	cots_to_t td[MAX_NT];
 	cots_to_t avg;
+	unsigned int dsh;
 	size_t z = 0U;
 
 	/* deltaify */
-	delt(td, to, nt);
+	dsh = delt(td, to, nt);
 	/* estimate average delta */
 	avg = avgt(td, nt);
 	/* kill the average */
-	rmavgt(td, nt, avg);
-	/* store average, endian? */
-	memcpy(tgt, &avg, sizeof(avg));
-	z += sizeof(avg);
+	rmavgt(td, nt, avg, dsh);
+	/* store average and delta bit, big-endian */
+	with (uint64_t ad = (avg << 1U) ^ dsh) {
+		ad = htobe64(ad);
+		memcpy(tgt, &ad, sizeof(ad));
+		z += sizeof(ad);
+	}
 	z += pfor_enc64(tgt + z, td, nt);
 	return z;
 }
@@ -128,16 +136,22 @@ static size_t
 _dcmp(cots_to_t *restrict tgt, size_t nt, const uint8_t *restrict c, size_t z)
 {
 	cots_to_t avg;
+	unsigned int dsh;
 	size_t ci = 0U;
 	(void)z;
 
-	/* snarf average value */
-	memcpy(&avg, c, sizeof(avg));
-	ci += sizeof(avg);
+	/* snarf average+delta value */
+	with (uint64_t ad) {
+		memcpy(&ad, c, sizeof(ad));
+		ad = be64toh(ad);
+		avg = ad >> 1U;
+		dsh = ad & 0b1U;
+		ci += sizeof(ad);
+	}
 	ci += pfor_dec64(tgt, c + ci, nt);
 
 	/* add average too */
-	adavgt(tgt, nt, avg);
+	adavgt(tgt, nt, avg, dsh);
 	/* and cumsum the whole thing */
 	sumt(tgt, nt);
 	return ci;
