@@ -34,9 +34,12 @@ TESTS_ENVIRONMENT = root=$(top_srcdir)
 
 
 check_PROGRAMS += creat_01
-TESTS += creat_01
 TESTS += creat_01.clit
 
-.NOTPARALLEL:
+check_PROGRAMS += creat_02
+TESTS += creat_02.clit
+
+check_PROGRAMS += open_twice_01
+TESTS += open_twice_01.clit
 
 ## Makefile.am ends here
