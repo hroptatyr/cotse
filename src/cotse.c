@@ -805,20 +805,18 @@ nul_out:
 }
 
 static cots_ts_t
-_open_core(int fd, off_t at)
+_open_core(int fd, struct orng_s r)
 {
+/* treat range R.BEG till R.END as cots_ts and try and open it */
 	struct _ss_s *res;
 	struct fhdr_s hdr;
-	struct stat st;
 	const char *layo;
 	size_t nflds;
 	size_t blkz;
 
-	if (UNLIKELY(fstat(fd, &st) < 0)) {
+	if (UNLIKELY(r.end - r.beg < (ssize_t)sizeof(*res->mdr))) {
 		return NULL;
-	} else if (UNLIKELY(st.st_size < at + (ssize_t)sizeof(*res->mdr))) {
-		return NULL;
-	} else if (pread(fd, &hdr, sizeof(hdr), at) < (ssize_t)sizeof(hdr)) {
+	} else if (pread(fd, &hdr, sizeof(hdr), r.beg) < (ssize_t)sizeof(hdr)) {
 		/* header bit b0rked */
 		return NULL;
 	}
@@ -832,7 +830,7 @@ _open_core(int fd, off_t at)
 		blkz = exp_lgbz(hfl & 0xfU);
 	}
 	/* snarf the layout and calculate zrow size */
-	nflds = _rd_layo(&layo, fd, at + sizeof(hdr));
+	nflds = _rd_layo(&layo, fd, r.beg + sizeof(hdr));
 
 
 	/* construct the result object */
@@ -852,7 +850,7 @@ _open_core(int fd, off_t at)
 	}
 
 	/* map the header for reference */
-	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, at, _hdrz(res));
+	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, r.beg, _hdrz(res));
 	if (UNLIKELY(res->mdr == NULL)) {
 		goto fre_out;
 	}
@@ -860,8 +858,8 @@ _open_core(int fd, off_t at)
 	/* collect details about this backing file */
 	res->fd = fd;
 	res->fl = O_RDONLY;
-	res->fo = at + be64toh(res->mdr->moff) ?: st.st_size;
-	res->ro = at + _hdrz(res);
+	res->fo = r.beg + be64toh(res->mdr->moff) ?: r.end;
+	res->ro = r.beg + _hdrz(res);
 
 	/* short dip into the meta pool */
 	(void)_rd_meta(res);
@@ -952,16 +950,20 @@ free_cots_ts(cots_ts_t s)
 cots_ts_t
 cots_open_ts(const char *file, int flags)
 {
+	struct stat st;
 	cots_ts_t res;
+	off_t eo;
 	int fd;
 
 	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
 		return NULL;
-	} else if ((res = _open_core(fd, 0)) == NULL) {
-		save_errno {
-			close(fd);
-		}
-		return NULL;
+	} else if (UNLIKELY(fstat(fd, &st) < 0)) {
+		goto clo_out;
+	} else if (UNLIKELY((eo = st.st_size) <= 0)) {
+		/* nothing to open here, is there */
+		goto clo_out;
+	} else if ((res = _open_core(fd, (struct orng_s){0, eo})) == NULL) {
+		goto clo_out;
 	}
 
 	/* make backing file known */
@@ -970,7 +972,7 @@ cots_open_ts(const char *file, int flags)
 	if (flags == O_RDONLY) {
 		/* do up the index, coupling! */
 		struct _ss_s *_res = (void*)res;
-		off_t at = 0;
+		struct orng_s at = {0, eo};
 
 		do {
 			off_t noff = be64toh(_res->mdr->noff);
@@ -979,12 +981,19 @@ cots_open_ts(const char *file, int flags)
 				break;
 			}
 			/* recursively read indices */
-			_res->idx = _open_core(fd, at += noff);
+			at.beg += noff;
+			_res->idx = _open_core(fd, at);
 		} while ((_res = (void*)_res->idx));
 	} else {
 		;
 	}
 	return res;
+
+clo_out:
+	save_errno {
+		close(fd);
+	}
+	return NULL;
 }
 
 int
