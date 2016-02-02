@@ -805,7 +805,7 @@ nul_out:
 }
 
 static cots_ts_t
-_open_ro(int fd, off_t at)
+_open_core(int fd, off_t at)
 {
 	struct _ss_s *res;
 	struct fhdr_s hdr;
@@ -852,7 +852,7 @@ _open_ro(int fd, off_t at)
 	}
 
 	/* map the header for reference */
-	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
+	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, at, _hdrz(res));
 	if (UNLIKELY(res->mdr == NULL)) {
 		goto fre_out;
 	}
@@ -865,14 +865,6 @@ _open_ro(int fd, off_t at)
 
 	/* short dip into the meta pool */
 	(void)_rd_meta(res);
-
-	/* and the index, coupling! */
-	with (off_t noff = be64toh(res->mdr->noff)) {
-		if (UNLIKELY(!noff)) {
-			break;
-		}
-		res->idx = _open_ro(fd, at + noff);
-	}
 
 	/* use a backing file */
 	return (cots_ts_t)res;
@@ -960,21 +952,39 @@ free_cots_ts(cots_ts_t s)
 cots_ts_t
 cots_open_ts(const char *file, int flags)
 {
-	if (flags == O_RDONLY) {
-		cots_ts_t res;
-		int fd;
+	cots_ts_t res;
+	int fd;
 
-		if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
-			return NULL;
-		} else if ((res = _open_ro(fd, 0)) == NULL) {
+	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
+		return NULL;
+	} else if ((res = _open_core(fd, 0)) == NULL) {
+		save_errno {
 			close(fd);
-			return NULL;
 		}
-		/* make backing file known */
-		_inject_fn(res, file);
-		return res;
+		return NULL;
 	}
-	return NULL;
+
+	/* make backing file known */
+	_inject_fn(res, file);
+
+	if (flags == O_RDONLY) {
+		/* do up the index, coupling! */
+		struct _ss_s *_res = (void*)res;
+		off_t at = 0;
+
+		do {
+			off_t noff = be64toh(_res->mdr->noff);
+
+			if (UNLIKELY(!noff)) {
+				break;
+			}
+			/* recursively read indices */
+			_res->idx = _open_core(fd, at += noff);
+		} while ((_res = (void*)_res->idx));
+	} else {
+		;
+	}
+	return res;
 }
 
 int
