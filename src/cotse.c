@@ -252,6 +252,16 @@ _algn_zrow(const char *layout, size_t nflds)
 }
 
 
+/* _ss_s and cots_ts_t fiddlers */
+static inline void
+_inject_fn(cots_ts_t s, const char *fn)
+{
+	/* make backing file known */
+	s->filename = strdup(fn);
+	return;
+}
+
+
 static int
 _bang_tsoa(
 	uint8_t *restrict rows,
@@ -794,6 +804,76 @@ nul_out:
 	return 0U;
 }
 
+static cots_ts_t
+_open_ro(int fd, off_t at)
+{
+	struct _ss_s *res;
+	struct fhdr_s hdr;
+	struct stat st;
+	const char *layo;
+	size_t nflds;
+	size_t blkz;
+
+	if (fstat(fd, &st) < 0) {
+		return NULL;
+	} else if (UNLIKELY(st.st_size < at + (ssize_t)sizeof(*res->mdr))) {
+		return NULL;
+	} else if (pread(fd, &hdr, sizeof(hdr), at) < (ssize_t)sizeof(hdr)) {
+		/* header bit b0rked */
+		return NULL;
+	}
+	/* inspect header */
+	if (memcmp(hdr.magic, "cots", sizeof(hdr.magic))) {
+		/* nope, better fuck off then */
+		return NULL;
+	}
+	/* read block size */
+	with (uint64_t hfl = be64toh(hdr.flags)) {
+		blkz = exp_lgbz(hfl & 0xfU);
+	}
+	/* snarf the layout and calculate zrow size */
+	nflds = _rd_layo(&layo, fd, at + sizeof(hdr));
+
+
+	/* construct the result object */
+	if (UNLIKELY((res = calloc(1, sizeof(*res))) == NULL)) {
+		return NULL;
+	}
+
+	/* make number of fields known publicly */
+	with (void *nfp = deconst(&res->public.nfields)) {
+		memcpy(nfp, &nflds, sizeof(nflds));
+		/* also keep layout for reference */
+		res->public.layout = layo;
+	}
+	/* make blocksize known publicly */
+	with (void *bzp = deconst(&res->public.blockz)) {
+		memcpy(bzp, &blkz, sizeof(blkz));
+	}
+
+	/* map the header for reference */
+	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
+	if (UNLIKELY(res->mdr == NULL)) {
+		goto fre_out;
+	}
+
+	/* collect details about this backing file */
+	res->fd = fd;
+	res->fl = O_RDONLY;
+	res->fo = at + be64toh(res->mdr->moff) ?: st.st_size;
+	res->ro = at + _hdrz(res);
+
+	/* short dip into the meta pool */
+	(void)_rd_meta(res);
+
+	/* use a backing file */
+	return (cots_ts_t)res;
+
+fre_out:
+	free(res);
+	return NULL;
+}
+
 
 /* public series storage API */
 cots_ts_t
@@ -872,235 +952,19 @@ free_cots_ts(cots_ts_t s)
 cots_ts_t
 cots_open_ts(const char *file, int flags)
 {
-	struct _ss_s *res;
-	struct fhdr_s hdr;
-	struct stat st;
-	size_t nflds;
-	size_t blkz;
-	size_t zrow;
-	int fd;
+	if (flags == O_RDONLY) {
+		cots_ts_t res;
+		int fd;
 
-	if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
-		return NULL;
-	} else if (fstat(fd, &st) < 0) {
-		goto clo_out;
-	}
-
-	if (UNLIKELY(st.st_size < (ssize_t)sizeof(*res->mdr))) {
-		goto clo_out;
-	}
-
-	/* read header bit */
-	if (read(fd, &hdr, sizeof(hdr)) < (ssize_t)sizeof(hdr)) {
-		goto clo_out;
-	}
-	/* inspect header */
-	if (memcmp(hdr.magic, "cots", sizeof(hdr.magic))) {
-		/* nope, better fuck off then */
-		goto clo_out;
-	}
-
-	if (UNLIKELY((res = calloc(1, sizeof(*res))) == NULL)) {
-		return NULL;
-	}
-	/* read block size */
-	with (uint64_t fl = be64toh(hdr.flags)) {
-		blkz = exp_lgbz(fl & 0xfU);
-	}
-	/* make backing file known */
-	res->public.filename = strdup(file);
-	/* snarf the layout and calculate zrow size */
-	with (const char *layo = NULL) {
-		nflds = _rd_layo(&layo, fd);
-		if (layo != NULL) {
-			/* keep for reference */
-			res->public.layout = layo;
-			/* determine algiend size */
-			zrow = _algn_zrow(layo, nflds);
+		if ((fd = open(file, flags ? O_RDWR : O_RDONLY)) < 0) {
+			return NULL;
+		} else if ((res = _open_ro(fd, 0)) == NULL) {
+			close(fd);
+			return NULL;
 		}
-	}
-
-
-	/* make number of fields known publicly */
-	with (void *nfp = deconst(&res->public.nfields)) {
-		memcpy(nfp, &nflds, sizeof(nflds));
-	}
-	/* make blocksize known publicly */
-	with (void *bzp = deconst(&res->public.blockz)) {
-		memcpy(bzp, &blkz, sizeof(blkz));
-	}
-
-	/* map the header for reference */
-	res->mdr = mmap_any(fd, PROT_READ, MAP_SHARED, 0, _hdrz(res));
-	if (UNLIKELY(res->mdr == NULL)) {
-		goto fre_out;
-	}
-
-	/* collect details about this backing file */
-	res->fd = fd;
-	res->fl = flags;
-	res->fo = be64toh(res->mdr->moff) ?: st.st_size;
-	res->ro = _hdrz(res);
-
-	/* short dip into the meta pool */
-	(void)_rd_meta(res);
-
-	if (flags/*O_RDWR*/) {
-		/* roll back last page into WAL */
-		const char *layo = res->public.layout;
-		off_t laso = res->fo - sizeof(uint64_t);
-		uint64_t lasz;
-		uint64_t xchk;
-
-		if (UNLIKELY(laso > st.st_size ||
-			     laso < (off_t)sizeof(*res->mdr))) {
-			goto fre_out;
-		} else if (UNLIKELY(pread(res->fd, &lasz, sizeof(lasz), laso)
-				    < (ssize_t)sizeof(lasz))) {
-			goto fre_out;
-		}
-		lasz = be64toh(lasz);
-		lasz >>= 24U;
-		laso -= lasz;
-
-		/* cross check */
-		if (UNLIKELY(pread(res->fd, &xchk, sizeof(xchk), laso)
-			     < (ssize_t)sizeof(xchk))) {
-			/* nope */
-			goto fre_out;
-		}
-		/* deendianify */
-		xchk = be64toh(xchk);
-
-		if (UNLIKELY((xchk >> 24U) + sizeof(uint64_t) != lasz)) {
-			/* no idea what that was then */
-			goto fre_out;
-		}
-
-		/* get some breathing space */
-		if (UNLIKELY((res->mwal = _make_wal(zrow, blkz)) == NULL)) {
-			goto fre_out;
-		}
-		/* attach file to wal */
-		res->wal = _wal_attach(res->mwal, file);
-		if (UNLIKELY(res->wal == NULL)) {
-			/* nah, don't bother */
-			goto wal_out;
-		}
-
-		/* check if page is non-full, if so read+decomp it */
-		if (LIKELY((xchk & 0xffffffU) + 1U < blkz)) {
-			struct {
-				union {
-					struct cots_tsoa_s t;
-					void *toffs;
-				};
-				void *flds[nflds];
-			} tgt;
-			off_t o = laso;
-			ssize_t nt;
-
-			/* set up target with the mwal */
-			tgt.toffs = res->mwal->data;
-			for (size_t i = 0U; i < nflds; i++) {
-				const size_t a = _algn_zrow(layo, i);
-				tgt.flds[i] = res->mwal->data + a * blkz;
-			}
-
-			nt = _rd_cpag(&tgt.t, res->fd, &o, lasz, layo, nflds);
-			if (UNLIKELY(nt < 0)) {
-				goto wal_out;
-			}
-
-			/* wind back file offset, we'll truncate later */
-			res->fo = laso;
-
-			/* rowify wal */
-			_bang_tsoa(res->wal->data, &tgt.t, nt, layo, nflds);
-			/* increment to WAL to NT */
-			_wal_rset(res->wal, nt);
-		}
-	}
-
-	/* dissect the file parts */
-	if (flags/*O_RDWR*/) {
-		off_t so = be64toh(res->mdr->noff) ?: st.st_size;
-		size_t flen = strlen(file);
-
-		if (so < st.st_size) {
-			/* for the temp file name */
-			char idxfn[flen + 5U];
-			const int idxfl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
-			int ifd;
-
-			/* construct temp filename */
-			memcpy(idxfn, file, flen);
-			memcpy(idxfn + flen, ".idx", sizeof(".idx"));
-
-			ifd = open(idxfn, idxfl, 0666);
-
-			/* copy index */
-			do {
-				ssize_t nsf;
-
-				nsf = sendfile(
-					ifd, res->fd, &so, st.st_size - so);
-				if (UNLIKELY(nsf <= 0)) {
-					/* oh great :| */
-					(void)ftruncate(ifd, 0);
-					(void)unlink(idxfn);
-					break;
-				}
-			} while (so < st.st_size);
-			/* finished, fingers crossed they wouldn't delete us */
-			close(ifd);
-
-			/* treat this as index */
-			if ((res->idx = make_cots_idx(file)) != NULL) {
-				/* again, terrible coupling but fiddle
-				 * with the index file's WAL seeing as
-				 * the last page need to be discarded
-				 * off there */
-				struct _ss_s *_idx = (void*)res->idx;
-				size_t n;
-
-				if (_idx->wal && (n = _wal_rowi(_idx->wal))) {
-					_wal_rset(_idx->wal, --n);
-				}
-			}
-		}
-	}
-
-	/* update header and stuff */
-	if (flags/*O_RDWR*/) {
-		size_t mz;
-
-		/* truncate to size without index or meta */
-		(void)ftruncate(res->fd, res->fo);
-		/* now then rewrite meta */
-		mz = _wr_meta(res);
-
-		/* update header, RACE */
-		(void)mprot_any(res->mdr, 0, _hdrz(res), PROT_MEM);
-		_updt_hdr(res, mz);
-	}
-
-	/* use a backing file */
-	return (cots_ts_t)res;
-
-wal_out:
-	if (res->mwal) {
-		_free_wal(res->mwal);
-	}
-	if (res->wal) {
-		_free_wal(res->mwal);
-	}
-fre_out:
-	free(deconst(res->public.filename));
-	free(res);
-clo_out:
-	save_errno {
-		close(fd);
+		/* make backing file known */
+		_inject_fn(res, file);
+		return res;
 	}
 	return NULL;
 }
