@@ -814,7 +814,7 @@ _open_ro(int fd, off_t at)
 	size_t nflds;
 	size_t blkz;
 
-	if (fstat(fd, &st) < 0) {
+	if (UNLIKELY(fstat(fd, &st) < 0)) {
 		return NULL;
 	} else if (UNLIKELY(st.st_size < at + (ssize_t)sizeof(*res->mdr))) {
 		return NULL;
@@ -865,6 +865,14 @@ _open_ro(int fd, off_t at)
 
 	/* short dip into the meta pool */
 	(void)_rd_meta(res);
+
+	/* and the index, coupling! */
+	with (off_t noff = be64toh(res->mdr->noff)) {
+		if (UNLIKELY(!noff)) {
+			break;
+		}
+		res->idx = _open_ro(fd, at + noff);
+	}
 
 	/* use a backing file */
 	return (cots_ts_t)res;
@@ -1099,7 +1107,11 @@ cots_detach(cots_ts_t s)
 	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
-		free_cots_idx(_s->idx);
+		if (_s->fl != O_RDONLY) {
+			free_cots_idx(_s->idx);
+		} else {
+			free_cots_ts(_s->idx);
+		}
 		_s->idx = NULL;
 	}
 	if (_s->public.filename) {
