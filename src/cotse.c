@@ -771,7 +771,7 @@ _rd_cpag(struct cots_tsoa_s *restrict tgt,
 }
 
 static size_t
-_rd_layo(const char **layo, int fd)
+_rd_layo(const char **layo, int fd, off_t at)
 {
 	size_t lz, li = 0U;
 	char *lp;
@@ -781,7 +781,7 @@ _rd_layo(const char **layo, int fd)
 		return 0U;
 	}
 	while (1) {
-		ssize_t nrd = read(fd, lp + li, lz - li);
+		ssize_t nrd = pread(fd, lp + li, lz - li, at + li);
 		const char *eo;
 
 		if (UNLIKELY(nrd <= 0)) {
