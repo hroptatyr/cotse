@@ -911,6 +911,22 @@ _yank_rng(const char *fn, int fd, struct orng_s r)
 }
 
 static int
+_open_idx(struct _ss_s *_s, off_t eo)
+{
+	struct orng_s at = {0, eo};
+
+	do {
+		off_t noff = be64toh(_s->mdr->noff);
+
+		if (UNLIKELY(!noff || (at.beg += noff) >= at.end)) {
+			break;
+		}
+		_s->idx = _open_core(_s->fd, at);
+	} while ((_s = (void*)_s->idx));
+	return 0;
+}
+
+static int
 _move_idx(struct _ss_s *_s, off_t eo)
 {
 	size_t flen = strlen(_s->public.filename);
@@ -1046,18 +1062,8 @@ cots_open_ts(const char *file, int flags)
 	if (flags == O_RDONLY) {
 		/* do up the index, coupling! */
 		struct _ss_s *_res = (void*)res;
-		struct orng_s at = {0, eo};
 
-		do {
-			off_t noff = be64toh(_res->mdr->noff);
-
-			if (UNLIKELY(!noff)) {
-				break;
-			}
-			/* recursively read indices */
-			at.beg += noff;
-			_res->idx = _open_core(fd, at);
-		} while ((_res = (void*)_res->idx));
+		_open_idx(_res, eo);
 	} else {
 		/* right, dissect file, put index into separate file
 		 * and do that recursively */
