@@ -48,6 +48,7 @@
 #endif	/* HAVE_SYS_SENDFILE_H */
 #include <fcntl.h>
 #include <errno.h>
+#include <math.h>
 #include "cotse.h"
 #include "index.h"
 #include "wal.h"
@@ -195,6 +196,12 @@ static inline __attribute__((pure, const)) size_t
 min_z(size_t x, size_t y)
 {
 	return x < y ? x : y;
+}
+
+static inline __attribute__((pure, const)) size_t
+max_z(size_t x, size_t y)
+{
+	return x < y ? y : x;
 }
 
 static inline __attribute__((const, pure)) size_t
@@ -872,6 +879,73 @@ fre_out:
 	return NULL;
 }
 
+static int
+_yank_rng(const char *fn, int fd, struct orng_s r)
+{
+/* assume stuff between R.BEG and R.END is an index series
+ * cut that out and write to separate file FN. */
+	const int fl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
+	int resfd;
+
+	if (UNLIKELY(r.beg >= r.end)) {
+		/* yeah right */
+		return -1;
+	} else if (UNLIKELY((resfd = open(fn, fl, 0666)) < 0)) {
+		/* pass on the error */
+		return -1;
+	}
+	/* copy range */
+	do {
+		ssize_t nsf;
+
+		nsf = sendfile(resfd, fd, &r.beg, r.end - r.beg);
+		if (UNLIKELY(nsf < 0)) {
+			/* no way */
+			(void)unlink(fn);
+			close(resfd);
+			resfd = -1;
+			break;
+		}
+	} while (r.beg < r.end);
+	return resfd;
+}
+
+static int
+_move_idx(struct _ss_s *_s, off_t eo)
+{
+	size_t flen = strlen(_s->public.filename);
+	/* estimate how many index sections there will be,
+	 * we'd say there's at most 1kB of index for 10kB of data,
+	 * so simply guesstimate the number as log10 of size minus 3 */
+	const size_t idepth = max_z(log10((double)eo) - 3, 0U);
+	/* reserve string space */
+	char ifn[flen + strlenof(".idx") * idepth + 1U];
+	struct orng_s irng = {.end = eo};
+
+	memcpy(ifn, _s->public.filename, flen);
+	for (size_t i = 0U;
+	     i < idepth && (irng.beg = be64toh(_s->mdr->noff));
+	     i++, _s = (void*)_s->idx) {
+		int ifd;
+
+		/* construct a new temp file name */
+		memcpy(ifn + flen + i * strlenof(".idx"),
+		       ".idx", sizeof(".idx"));
+		if ((ifd = _yank_rng(ifn, _s->fd, irng)) < 0) {
+			break;
+		}
+		/* try and read this as a cots file*/
+		irng.end -= irng.beg, irng.beg = 0;
+		if ((_s->idx = _open_core(ifd, irng)) == NULL) {
+			close(ifd);
+			break;
+		}
+		/* memorise temp file name */
+		_inject_fn(_s->idx, ifn);
+	}
+	return 0;
+}
+
 
 /* public series storage API */
 cots_ts_t
@@ -985,7 +1059,14 @@ cots_open_ts(const char *file, int flags)
 			_res->idx = _open_core(fd, at);
 		} while ((_res = (void*)_res->idx));
 	} else {
-		;
+		/* right, dissect file, put index into separate file
+		 * and do that recursively */
+		struct _ss_s *_res = (void*)res;
+
+		/* pass on the right flags */
+		_res->fl = flags;
+		/* read indices and move them */
+		_move_idx(_res, eo);
 	}
 	return res;
 
