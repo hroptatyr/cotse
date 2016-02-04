@@ -103,6 +103,13 @@ struct chnk_s {
 	uint8_t type;
 };
 
+/* page frames */
+struct pagf_s {
+	off_t beg;
+	off_t end;
+	unsigned int bits;
+};
+
 struct _ss_s {
 	struct cots_ss_s public;
 
@@ -960,6 +967,47 @@ _move_idx(struct _ss_s *_s, off_t eo)
 		_inject_fn(_s->idx, ifn);
 	}
 	return 0;
+}
+
+static struct pagf_s
+_prev_pg(int fd, off_t at)
+{
+/* given an offset in FD and assuming a page precedes it immediately
+ * return the page's offsets (in octets) within FD
+ * wrt the beginning of the file */
+	uint64_t z;
+	unsigned int b;
+
+	at -= sizeof(uint64_t);
+	if (UNLIKELY(pread(fd, &z, sizeof(z), at) < (ssize_t)sizeof(z))) {
+		return (struct pagf_s){0};
+	}
+	/* nativendianify */
+	z = be64toh(z);
+	/* and massage because it also contains a crc24 */
+	b = z & 0xffffffU;
+	z >>= 24U;
+	return (struct pagf_s){at - z, at, b};
+}
+
+static struct pagf_s
+_next_pg(int fd, off_t at)
+{
+/* given an offset in FD and assuming a page starts there immediately
+ * return the page's offsets (in octets) within FD
+ * wrt the beginning of the file */
+	uint64_t z;
+	unsigned int b;
+
+	if (UNLIKELY(pread(fd, &z, sizeof(z), at) < (ssize_t)sizeof(z))) {
+		return (struct pagf_s){0};
+	}
+	/* nativendianify */
+	z = be64toh(z);
+	/* and massage because it contains the tick count as well */
+	b = z & 0xffffffU;
+	z >>= 24U;
+	return (struct pagf_s){at, at + z + sizeof(uint64_t), b};
 }
 
 
