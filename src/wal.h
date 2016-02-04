@@ -70,6 +70,9 @@ _wal_attach(const struct cots_wal_s *w, const char *fn);
 extern int
 _wal_detach(const struct cots_wal_s *w, const char *fn);
 
+extern struct cots_wal_s*
+_wal_create(size_t zrow, size_t blkz, const char *fn);
+
 
 static inline __attribute__((const)) size_t
 _wal_rowi(const struct cots_wal_s *w)

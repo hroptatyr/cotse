@@ -96,6 +96,47 @@ _free_wal(struct cots_wal_s *w)
 }
 
 struct cots_wal_s*
+_wal_create(size_t zrow, size_t blkz, const char *fn)
+{
+	const size_t fz = zrow * blkz + sizeof(struct cots_wal_s);
+	struct cots_wal_s *res = NULL;
+	int fd;
+
+	if (UNLIKELY(fn == NULL)) {
+		goto nul_out;
+	}
+	/* construct temp filename */
+	with (size_t z = strlen(fn)) {
+		char walfn[z + 5U];
+		const int walfl = O_CREAT | O_TRUNC/*?*/ | O_RDWR;
+
+		memcpy(walfn, fn, z);
+		memcpy(walfn + z, ".wal", sizeof(".wal"));
+
+		if (UNLIKELY((fd = open(walfn, walfl, 0666)) < 0)) {
+			goto nul_out;
+		}
+	}
+	if (UNLIKELY(ftruncate(fd, fz) < 0)) {
+		goto clo_out;
+	}
+	/* map the file */
+	res = mmap(NULL, fz, PROT_MEM, MAP_SHARED, fd, 0);
+	if (UNLIKELY(res == MAP_FAILED)) {
+		/* well done, just what we need */
+		goto clo_out;
+	}
+	/* initialise wal */
+	_wal_init(res, zrow, blkz);
+
+clo_out:
+	/* close the descriptor but leave the mapping */
+	close(fd);
+nul_out:
+	return res;
+}
+
+struct cots_wal_s*
 _wal_attach(const struct cots_wal_s *w, const char *fn)
 {
 	const size_t fz = _walz(w);
