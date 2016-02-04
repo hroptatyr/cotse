@@ -933,42 +933,6 @@ _open_idx(struct _ss_s *_s, off_t eo)
 	return 0;
 }
 
-static int
-_move_idx(struct _ss_s *_s, off_t eo)
-{
-	size_t flen = strlen(_s->public.filename);
-	/* estimate how many index sections there will be,
-	 * we'd say there's at most 1kB of index for 10kB of data,
-	 * so simply guesstimate the number as log10 of size minus 3 */
-	const size_t idepth = max_z(log10((double)eo) - 3, 0U);
-	/* reserve string space */
-	char ifn[flen + strlenof(".idx") * idepth + 1U];
-	struct orng_s irng = {.end = eo};
-
-	memcpy(ifn, _s->public.filename, flen);
-	for (size_t i = 0U;
-	     i < idepth && (irng.beg = be64toh(_s->mdr->noff));
-	     i++, _s = (void*)_s->idx) {
-		int ifd;
-
-		/* construct a new temp file name */
-		memcpy(ifn + flen + i * strlenof(".idx"),
-		       ".idx", sizeof(".idx"));
-		if ((ifd = _yank_rng(ifn, _s->fd, irng)) < 0) {
-			break;
-		}
-		/* try and read this as a cots file*/
-		irng.end -= irng.beg, irng.beg = 0;
-		if ((_s->idx = _open_core(ifd, irng)) == NULL) {
-			close(ifd);
-			break;
-		}
-		/* memorise temp file name */
-		_inject_fn(_s->idx, ifn);
-	}
-	return 0;
-}
-
 static struct pagf_s
 _prev_pg(int fd, off_t at)
 {
@@ -1090,6 +1054,46 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 wal_out:
 	_free_wal(res);
 	return NULL;
+}
+
+static int
+_move_idx(struct _ss_s *_s, off_t eo)
+{
+	size_t flen = strlen(_s->public.filename);
+	/* estimate how many index sections there will be,
+	 * we'd say there's at most 1kB of index for 10kB of data,
+	 * so simply guesstimate the number as log10 of size minus 3 */
+	const size_t idepth = max_z(log10((double)eo) - 3, 0U);
+	/* reserve string space */
+	char ifn[flen + strlenof(".idx") * idepth + 1U];
+	struct orng_s irng = {.end = eo};
+
+	memcpy(ifn, _s->public.filename, flen);
+	for (size_t i = 0U;
+	     i < idepth && (irng.beg = be64toh(_s->mdr->noff));
+	     i++, _s = (void*)_s->idx) {
+		int ifd;
+
+		/* construct a new temp file name */
+		memcpy(ifn + flen + i * strlenof(".idx"),
+		       ".idx", sizeof(".idx"));
+		if ((ifd = _yank_rng(ifn, _s->fd, irng)) < 0) {
+			break;
+		}
+		/* try and read this as a cots file*/
+		irng.end -= irng.beg, irng.beg = 0;
+		if ((_s->idx = _open_core(ifd, irng)) == NULL) {
+			close(ifd);
+			break;
+		}
+		/* memorise temp file name */
+		_inject_fn(_s->idx, ifn);
+		/* also WALify the index */
+		with (struct _ss_s *_sidx = (void*)_s->idx) {
+			_sidx->wal = _yank_wal(_sidx, irng.end - irng.beg);
+		}
+	}
+	return 0;
 }
 
 
