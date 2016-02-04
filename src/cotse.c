@@ -1010,6 +1010,88 @@ _next_pg(int fd, off_t at)
 	return (struct pagf_s){at, at + z + sizeof(uint64_t), b};
 }
 
+static struct cots_wal_s*
+_yank_wal(struct _ss_s *_s, off_t eo)
+{
+/* examine last page of _S, create a WAL and bang stuff there */
+	const char *layo = _s->public.layout;
+	const size_t nflds = _s->public.nfields;
+	const size_t blkz = _s->public.blockz;
+	const size_t zrow = _algn_zrow(layo, nflds);
+	struct cots_wal_s *res;
+	struct pagf_s f;
+	size_t nt;
+
+	f = _prev_pg(_s->fd, _s->fo);
+	if (UNLIKELY(f.beg >= f.end)) {
+		/* empty range is not really WAL-worthy is it? */
+		return NULL;
+	} else if (UNLIKELY(f.end >= eo)) {
+		/* page ends behind end-of-file? yeah, right! */
+		return NULL;
+	}
+	/* cross check and get number of ticks*/
+	with (struct pagf_s nf = _next_pg(_s->fd, f.beg)) {
+		/* compare the orng_s portion because the bits might differ */
+		if (UNLIKELY(memcmp(&f, &nf, sizeof(struct orng_s)))) {
+			/* that's just not on */
+			return NULL;
+		}
+		/* yay, snarf them ticks */
+		nt = nf.bits + 1U;
+	}
+
+	/* get some breathing space */
+	with (const char *fn = _s->public.filename) {
+		if (UNLIKELY((res = _wal_create(zrow, blkz, fn)) == NULL)) {
+			return NULL;
+		}
+	}
+
+	/* check if page is non-full, if so read+decomp it */
+	if (LIKELY(nt < blkz)) {
+		struct {
+			union {
+				struct cots_tsoa_s t;
+				void *toffs;
+			};
+			void *flds[nflds];
+		} tgt;
+		off_t o = f.beg;
+		ssize_t ntrd;
+
+		/* set up target with the mwal */
+		tgt.toffs = res->data;
+		for (size_t i = 0U; i < nflds; i++) {
+			const size_t a = _algn_zrow(layo, i);
+			tgt.flds[i] = res->data + a * blkz;
+		}
+
+		ntrd = _rd_cpag(&tgt.t, _s->fd, &o, f.end - f.beg, layo, nflds);
+		if (UNLIKELY(ntrd < 0)) {
+			goto wal_out;
+		} else if (UNLIKELY(ntrd != nt)) {
+			/* shouldn't we feel sorry and accept at least
+			 * the number of read ticks? */
+			goto wal_out;
+		}
+
+		/* wind back file offset, we'll truncate later */
+		_s->fo = f.beg;
+
+		/* rowify wal */
+		_bang_tsoa(res->data, &tgt.t, nt, layo, nflds);
+		/* increment to WAL to NT */
+		_wal_rset(res, nt);
+	}
+	/* otherwise don't read anything back, go with a clean WAL */
+	return res;
+
+wal_out:
+	_free_wal(res);
+	return NULL;
+}
+
 
 /* public series storage API */
 cots_ts_t
@@ -1121,6 +1203,8 @@ cots_open_ts(const char *file, int flags)
 		_res->fl = flags;
 		/* read indices and move them */
 		_move_idx(_res, eo);
+		/* turn contents of last page into WAL */
+		_res->wal = _yank_wal(_res, eo);
 	}
 	return res;
 
