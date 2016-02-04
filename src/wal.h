@@ -50,7 +50,7 @@ struct cots_wal_s {
 	/* COTS_ENDIAN written in native endian */
 	const uint16_t endian;
 	/* block size in bytes and native endian */
-	uint64_t blkz;
+	const uint64_t blkz;
 	/* row size in bytes and native endian */
 	const uint64_t zrow;
 	/* row index in native endian */
@@ -69,6 +69,9 @@ _wal_attach(const struct cots_wal_s *w, const char *fn);
 
 extern int
 _wal_detach(const struct cots_wal_s *w, const char *fn);
+
+extern struct cots_wal_s*
+_wal_create(size_t zrow, size_t blkz, const char *fn);
 
 
 static inline __attribute__((const)) size_t
