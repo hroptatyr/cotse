@@ -64,6 +64,14 @@ _walz(const struct cots_wal_s *w)
 	return blkz * zrow + sizeof(*w);
 }
 
+static inline void
+_wal_init(struct cots_wal_s *restrict w, size_t zrow, size_t blkz)
+{
+	struct cots_wal_s proto = {"cots", "w0", COTS_ENDIAN, blkz, zrow};
+	memcpy(w, &proto, sizeof(proto));
+	return;
+}
+
 
 struct cots_wal_s*
 _make_wal(size_t zrow, size_t blkz)
@@ -76,8 +84,7 @@ _make_wal(size_t zrow, size_t blkz)
 		return NULL;
 	}
 	/* otherwise */
-	memcpy(w, &(struct cots_wal_s){"cots", "w0", COTS_ENDIAN, blkz, zrow},
-	       sizeof(*w));
+	_wal_init(w, zrow, blkz);
 	return w;
 }
 
