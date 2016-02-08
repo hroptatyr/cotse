@@ -49,6 +49,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <math.h>
+#include <assert.h>
 #include "cotse.h"
 #include "index.h"
 #include "wal.h"
@@ -985,8 +986,11 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 
 	/* get some breathing space */
 	with (const char *fn = _s->public.filename) {
+		assert(_s->mwal == NULL);
 		if (UNLIKELY((res = _wal_create(zrow, blkz, fn)) == NULL)) {
 			return -1;
+		} else if ((_s->mwal = _make_wal(zrow, blkz)) == NULL) {
+			goto wal_out;
 		}
 	}
 
@@ -1003,19 +1007,19 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 		ssize_t ntrd;
 
 		/* set up target with the mwal */
-		tgt.toffs = res->data;
+		tgt.toffs = _s->mwal->data;
 		for (size_t i = 0U; i < nflds; i++) {
 			const size_t a = _algn_zrow(layo, i);
-			tgt.flds[i] = res->data + a * blkz;
+			tgt.flds[i] = _s->mwal->data + a * blkz;
 		}
 
 		ntrd = _rd_cpag(&tgt.t, _s->fd, &o, f.end - f.beg, layo, nflds);
 		if (UNLIKELY(ntrd < 0)) {
-			goto wal_out;
+			goto wal_mwal_out;
 		} else if (UNLIKELY(ntrd != nt)) {
 			/* shouldn't we feel sorry and accept at least
 			 * the number of read ticks? */
-			goto wal_out;
+			goto wal_mwal_out;
 		}
 
 		/* wind back file offset, we'll truncate later */
@@ -1030,6 +1034,8 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 	_s->wal = res;
 	return 0;
 
+wal_mwal_out:
+	_free_wal(_s->mwal);
 wal_out:
 	_free_wal(res);
 	return -1;
@@ -1324,11 +1330,11 @@ cots_detach(cots_ts_t s)
 		;
 	} else if (_s->wal) {
 		/* swap with spare wal */
-		if ((_s->wal = _s->mwal)) {
-			_s->mwal = NULL;
-			/* assume flushed wal */
-			_wal_rset(_s->wal, 0U);
-		}
+		assert(_s->mwal);
+		_s->wal = _s->mwal;
+		_s->mwal = NULL;
+		/* assume flushed wal */
+		_wal_rset(_s->wal, 0U);
 	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
