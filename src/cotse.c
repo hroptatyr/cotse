@@ -768,10 +768,18 @@ _rd_cpag(struct cots_tsoa_s *restrict tgt,
 		nrows = (zn & 0xffffffU) + 1U;
 		rz = zn >> 24U;
 
+		if (UNLIKELY(rz > z)) {
+			/* more space than is mapped? */
+			nrows = 0U;
+			rz = 0U;
+			break;
+		}
 		/* decompress */
 		ntdcmp = dcmp(tgt, nflds, nrows, layo, p + sizeof(zn), rz);
 		if (UNLIKELY(ntdcmp != nrows)) {
 			nrows = 0U;
+			rz = 0U;
+			break;
 		}
 
 		rz += 2U * sizeof(zn);
