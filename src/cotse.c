@@ -344,7 +344,7 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 	size_t nrows;
 	size_t bi;
 	size_t bsz;
-	size_t z;
+	uint64_t z;
 
 	if (UNLIKELY(!(nrows = _wal_rowi(w)))) {
 		/* trivial */
