@@ -1353,10 +1353,11 @@ cots_detach(cots_ts_t s)
 		;
 	} else if (_s->wal) {
 		/* swap with spare wal */
-		_s->wal = _s->mwal;
-		_s->mwal = NULL;
-		/* assume flushed wal */
-		_wal_rset(_s->wal, 0U);
+		if ((_s->wal = _s->mwal)) {
+			_s->mwal = NULL;
+			/* assume flushed wal */
+			_wal_rset(_s->wal, 0U);
+		}
 	}
 	if (_s->idx) {
 		/* assume index has been dealt with in _freeze() */
