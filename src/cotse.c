@@ -1096,9 +1096,10 @@ _move_idx(struct _ss_s *_s, off_t eo)
 		}
 		/* memorise temp file name */
 		_inject_fn(_s->idx, ifn);
-		/* also WALify the index */
+		/* also WALify the index and reprotect him */
 		with (struct _ss_s *_sidx = (void*)_s->idx) {
 			_sidx->wal = _yank_wal(_sidx, irng.end - irng.beg);
+			(void)mprot_any(_sidx->mdr, 0, _hdrz(_sidx), PROT_MEM);
 		}
 	}
 	return 0;
@@ -1217,6 +1218,8 @@ cots_open_ts(const char *file, int flags)
 		_move_idx(_res, eo);
 		/* turn contents of last page into WAL */
 		_res->wal = _yank_wal(_res, eo);
+		/* switch off header write protection */
+		(void)mprot_any(_res->mdr, 0, _hdrz(_res), PROT_MEM);
 	}
 	return res;
 
@@ -1304,7 +1307,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 			goto unm_out;
 		}
 		/* yep they do, switch off write protection */
-		(void)mprot_any(mdr, 0, hz, PROT_WRITE);
+		(void)mprot_any(mdr, 0, hz, PROT_MEM);
 	}
 
 	/* we're good to go, detach any old files */
