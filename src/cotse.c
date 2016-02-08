@@ -952,7 +952,7 @@ _next_pg(int fd, off_t at)
 	return (struct pagf_s){at, at + z + sizeof(uint64_t), b};
 }
 
-static struct cots_wal_s*
+static int
 _yank_wal(struct _ss_s *_s, off_t eo)
 {
 /* examine last page of _S, create a WAL and bang stuff there */
@@ -967,17 +967,17 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 	f = _prev_pg(_s->fd, _s->fo);
 	if (UNLIKELY(f.beg >= f.end)) {
 		/* empty range is not really WAL-worthy is it? */
-		return NULL;
+		return -1;
 	} else if (UNLIKELY(f.end >= eo)) {
 		/* page ends behind end-of-file? yeah, right! */
-		return NULL;
+		return -1;
 	}
 	/* cross check and get number of ticks*/
 	with (struct pagf_s nf = _next_pg(_s->fd, f.beg)) {
 		/* compare the orng_s portion because the bits might differ */
 		if (UNLIKELY(memcmp(&f, &nf, sizeof(struct orng_s)))) {
 			/* that's just not on */
-			return NULL;
+			return -1;
 		}
 		/* yay, snarf them ticks */
 		nt = nf.bits + 1U;
@@ -986,7 +986,7 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 	/* get some breathing space */
 	with (const char *fn = _s->public.filename) {
 		if (UNLIKELY((res = _wal_create(zrow, blkz, fn)) == NULL)) {
-			return NULL;
+			return -1;
 		}
 	}
 
@@ -1027,11 +1027,12 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 		_wal_rset(res, nt);
 	}
 	/* otherwise don't read anything back, go with a clean WAL */
-	return res;
+	_s->wal = res;
+	return 0;
 
 wal_out:
 	_free_wal(res);
-	return NULL;
+	return -1;
 }
 
 static int
@@ -1068,7 +1069,7 @@ _move_idx(struct _ss_s *_s, off_t eo)
 		_inject_fn(_s->idx, ifn);
 		/* also WALify the index and reprotect him */
 		with (struct _ss_s *_sidx = (void*)_s->idx) {
-			_sidx->wal = _yank_wal(_sidx, irng.end - irng.beg);
+			_yank_wal(_sidx, irng.end - irng.beg);
 			(void)mprot_any(_sidx->mdr, 0, _hdrz(_sidx), PROT_MEM);
 		}
 	}
@@ -1187,7 +1188,7 @@ cots_open_ts(const char *file, int flags)
 		/* read indices and move them */
 		_move_idx(_res, eo);
 		/* turn contents of last page into WAL */
-		_res->wal = _yank_wal(_res, eo);
+		_yank_wal(_res, eo);
 		/* switch off header write protection */
 		(void)mprot_any(_res->mdr, 0, _hdrz(_res), PROT_MEM);
 	}
