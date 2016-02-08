@@ -311,51 +311,21 @@ _bang_tick(
 /* columnarise NROWS values in ROWS into COLS accordings to FLDS */
 	const size_t zrow = _algn_zrow(flds, nflds);
 
-	/* columnarise times */
-	with (const cots_to_t *t = (const cots_to_t*)rows) {
-		const size_t acols = zrow / sizeof(*t);
 
-		for (size_t j = 0U; j < nrows; j++) {
-			cols->toffs[j] = t[j * acols];
-		}
+	/* columnarise times */
+	for (size_t j = 0U; j < nrows; j++) {
+		memcpy(cols->toffs + j,
+		       rows + j * zrow + 0U, sizeof(*cols->toffs));
 	}
 
 	/* columnarise the rest */
-	for (size_t i = 0U; i < nflds; i++) {
-		/* next one is a bit of a Schlemiel, we could technically
-		 * iteratively compute A, much like _algn_zrow() does it,
-		 * but this way it saves us some explaining */
-		const size_t a = _algn_zrow(flds, i);
+	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+		uint8_t *c = cols->cols[i];
 
-		switch (flds[i]) {
-		case COTS_LO_PRC:
-		case COTS_LO_FLT: {
-			uint32_t *c = cols->cols[i];
-			const uint32_t *r = (const uint32_t*)(rows + a);
-			const size_t acols = zrow / sizeof(*r);
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = r[j * acols];
-			}
-			break;
-		}
-		case COTS_LO_TIM:
-		case COTS_LO_CNT:
-		case COTS_LO_STR:
-		case COTS_LO_SIZ:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL: {
-			uint64_t *c = cols->cols[i];
-			const uint64_t *r = (const uint64_t*)(rows + a);
-			const size_t acols = zrow / sizeof(*r);
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = r[j * acols];
-			}
-			break;
-		}
-		default:
-			break;
+		/* calculate next A value */
+		b = _algn_zrow(flds, i + 1U);
+		for (size_t j = 0U, wid = b - a; j < nrows; j++) {
+			memcpy(c + j * wid, rows + j * zrow + a, wid);
 		}
 	}
 	return 0;
