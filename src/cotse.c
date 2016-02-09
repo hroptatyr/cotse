@@ -134,6 +134,8 @@ struct _ss_s {
 	off_t fo;
 	/* current offset for reading */
 	off_t ro;
+	/* offset in ticks within the page */
+	size_t rt;
 
 	/* index, if any, this will be recursive */
 	cots_idx_t idx;
@@ -675,6 +677,7 @@ fre_out:
 	with (uint64_t bak[nflds + 1U]) {
 		_wal_last(bak, _s->wal);
 		_wal_rset(_s->wal, -1ULL);
+		_wal_rset(_s->mwal, -1ULL);
 		_wal_bang(_s->wal, bak);
 	}
 rst_out:
@@ -1528,6 +1531,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	const size_t nflds = _s->public.nfields;
 	const char *layo = _s->public.layout;
 	size_t mz;
+	size_t nr;
 
 	if (UNLIKELY(_s->fd < 0)) {
 		/* no backing file */
@@ -1540,30 +1544,45 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	/* guesstimate the page that needs mapping */
 	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
 	/* and read/decomp the page */
-	return _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
+	nr = _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
+	if (LIKELY(!_s->rt)) {
+		return nr;
+	}
+	/* otherwise it's extra-time, kill the first _s->rt ticks then */
+	assert(_s->rt <= nr);
+	/* adapt result value */
+	nr -= _s->rt;
+	/* start with the time offsets */
+	memmove(tgt->toffs, tgt->toffs + _s->rt, nr * sizeof(*tgt->toffs));
+	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, b = a) {
+		uint8_t *tp = tgt->cols[i];
+		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
+		const uint8_t *sp = tp + _s->rt * wid;
+		memmove(tp, sp, nr * wid);
+	}
+	_s->rt += nr;
+	_s->rt &= (blkz - 1U);
+	return nr;
 
-_wal_read_ticks:;
-	size_t nr = _wal_rowi(_s->mwal);
+_wal_read_ticks:
+	nr = _wal_rowi(_s->mwal);
 	size_t nt = _wal_rowi(_s->wal);
 
 	printf("gotto columnify %zu v %zu\n", nt, nr);
 	if (nt > nr) {
 		/* columnify again */
 		;
-	} else if (UNLIKELY(_s->ro >= _s->fo + (ssize_t)nr)) {
+	} else if (UNLIKELY(_s->rt >= nr)) {
 		return 0;
 	}
 	/* time vector first */
 	memcpy(tgt->toffs, _s->mwal->data, sizeof(*tgt->toffs) * nr);
 	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, a = b) {
 		const void *sp = _s->mwal->data + a * blkz;
-		size_t wid;
-
-		b = _algn_zrow(layo, i + 1U);
-		wid = b - a;
+		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
 		memcpy(tgt->cols[i], sp, nr * wid);
 	}
-	_s->ro += nr;
+	_s->rt += nr;
 	return nr;
 }
 
