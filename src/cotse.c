@@ -122,7 +122,9 @@ struct _ss_s {
 
 	/* row-oriented page buffer, wal */
 	struct cots_wal_s *wal;
-	/* memory wal for swapsies */
+	/* memory wal for swapsies,
+	 * this will generally hold column-oriented wal and is
+	 * updated from the row-WAL */
 	struct cots_wal_s *mwal;
 
 	/* currently attached file and its opening flags */
@@ -1021,6 +1023,8 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 			 * the number of read ticks? */
 			goto wal_mwal_out;
 		}
+		/* increment column-WAL row counter to NT */
+		_wal_rset(_s->mwal, nt);
 
 		/* wind back file offset, we'll truncate later */
 		_s->fo = f.beg;
@@ -1521,18 +1525,42 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	const char *layo = _s->public.layout;
 	size_t mz;
 
-	if (UNLIKELY(_s->ro >= _s->fo)) {
-		/* no recently added ticks, innit? */
-		return 0;
-	} else if (UNLIKELY(_s->fd < 0)) {
-		/* not backing file */
+	if (UNLIKELY(_s->fd < 0)) {
+		/* no backing file */
 		return -1;
+	} else if (UNLIKELY(_s->ro >= _s->fo)) {
+		/* no compressed ticks on their pages, innit? */
+		goto _wal_read_ticks;
 	}
 
 	/* guesstimate the page that needs mapping */
 	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
 	/* and read/decomp the page */
 	return _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
+
+_wal_read_ticks:;
+	size_t nr = _wal_rowi(_s->mwal);
+	size_t nt = _wal_rowi(_s->wal);
+
+	printf("gotto columnify %zu v %zu\n", nt, nr);
+	if (nt > nr) {
+		/* columnify again */
+		;
+	} else if (UNLIKELY(_s->ro >= _s->fo + (ssize_t)nr)) {
+		return 0;
+	}
+	/* time vector first */
+	memcpy(tgt->toffs, _s->mwal->data, sizeof(*tgt->toffs) * nr);
+	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, a = b) {
+		const void *sp = _s->mwal->data + a * blkz;
+		size_t wid;
+
+		b = _algn_zrow(layo, i + 1U);
+		wid = b - a;
+		memcpy(tgt->cols[i], sp, nr * wid);
+	}
+	_s->ro += nr;
+	return nr;
 }
 
 
