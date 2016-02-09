@@ -1073,10 +1073,21 @@ _move_idx(struct _ss_s *_s, off_t eo)
 		}
 		/* memorise temp file name */
 		_inject_fn(_s->idx, ifn);
-		/* also WALify the index and reprotect him */
+
 		with (struct _ss_s *_sidx = (void*)_s->idx) {
-			_yank_wal(_sidx, irng.end - irng.beg);
+			size_t ni;
+
+			/* reprotect the index's header */
 			(void)mprot_any(_sidx->mdr, 0, _hdrz(_sidx), PROT_MEM);
+
+			/* also yank last bob into WAL */
+			if (_yank_wal(_sidx, irng.end - irng.beg) < 0) {
+				break;
+			} else if (!(ni = _wal_rowi(_sidx->wal))) {
+				break;
+			}
+			/* and wind back the counter */
+			_wal_rset(_sidx->wal, --ni);
 		}
 	}
 	return 0;
