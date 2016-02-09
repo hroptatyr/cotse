@@ -339,8 +339,11 @@ _bang_tick(
 }
 
 static struct blob_s
-_make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
+_make_blob(
+	const char *flds, size_t nflds,
+	const struct cots_wal_s *src, struct cots_wal_s *restrict tmp)
 {
+	const size_t blkz = src->blkz;
 	struct {
 		struct cots_tsoa_s proto;
 		void *cols[nflds];
@@ -353,7 +356,7 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 	size_t bsz;
 	uint64_t z;
 
-	if (UNLIKELY(!(nrows = _wal_rowi(w)))) {
+	if (UNLIKELY(!(nrows = _wal_rowi(src)))) {
 		/* trivial */
 		return (struct blob_s){0U, NULL};
 	}
@@ -367,15 +370,14 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 		return (struct blob_s){0U, NULL};
 	}
 
-	/* prepare the tsoa */
-	cols.proto.toffs = (void*)ALGN16(buf + bi);
-	/* now for the rest */
+	/* imprint standard layout on COLS tsoa using mwal's buffer */
+	cols.proto.toffs = (void*)tmp->data;
 	for (size_t i = 0U; i < nflds; i++) {
-		bi += nrows * sizeof(uint64_t);
-		cols.cols[i] = (void*)ALGN16(buf + bi);
+		const size_t a = _algn_zrow(flds, i);
+		cols.cols[i] = tmp->data + blkz * a;
 	}
 	/* call the columnifier */
-	_bang_tick(&cols.proto, w->data, nrows, flds, nflds, 0U);
+	_bang_tick(&cols.proto, src->data, nrows, flds, nflds, 0U);
 
 	/* get from and till values */
 	cols.from = cols.proto.toffs[0U];
@@ -625,7 +627,7 @@ _flush(struct _ss_s *_s)
 	}
 
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->wal);
+	b = _make_blob(layo, nflds, _s->wal, _s->mwal);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
