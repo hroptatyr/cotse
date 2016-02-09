@@ -311,14 +311,16 @@ static int
 _bang_tick(
 	struct cots_tsoa_s *restrict cols,
 	const uint8_t *rows, size_t nrows,
-	const char *flds, size_t nflds)
+	const char *flds, size_t nflds,
+	size_t ot)
 {
-/* columnarise NROWS values in ROWS into COLS accordings to FLDS */
+/* columnarise NROWS values in ROWS into COLS accordings to FLDS
+ * assume OT rows have been written already */
 	const size_t zrow = _algn_zrow(flds, nflds);
 
 
 	/* columnarise times */
-	for (size_t j = 0U; j < nrows; j++) {
+	for (size_t j = ot; j < nrows; j++) {
 		memcpy(cols->toffs + j,
 		       rows + j * zrow + 0U, sizeof(*cols->toffs));
 	}
@@ -329,7 +331,7 @@ _bang_tick(
 
 		/* calculate next A value */
 		b = _algn_zrow(flds, i + 1U);
-		for (size_t j = 0U, wid = b - a; j < nrows; j++) {
+		for (size_t j = ot, wid = b - a; j < nrows; j++) {
 			memcpy(c + j * wid, rows + j * zrow + a, wid);
 		}
 	}
@@ -373,7 +375,7 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 		cols.cols[i] = (void*)ALGN16(buf + bi);
 	}
 	/* call the columnifier */
-	_bang_tick(&cols.proto, w->data, nrows, flds, nflds);
+	_bang_tick(&cols.proto, w->data, nrows, flds, nflds, 0U);
 
 	/* get from and till values */
 	cols.from = cols.proto.toffs[0U];
@@ -1557,8 +1559,7 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, b = a) {
 		uint8_t *tp = tgt->cols[i];
 		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
-		const uint8_t *sp = tp + _s->rt * wid;
-		memmove(tp, sp, nr * wid);
+		memmove(tp, tp + _s->rt * wid, nr * wid);
 	}
 	_s->rt += nr;
 	_s->rt &= (blkz - 1U);
@@ -1568,22 +1569,39 @@ _wal_read_ticks:
 	nr = _wal_rowi(_s->mwal);
 	size_t nt = _wal_rowi(_s->wal);
 
-	printf("gotto columnify %zu v %zu\n", nt, nr);
 	if (nt > nr) {
+		struct {
+			struct cots_tsoa_s proto;
+			void *cols[nflds];
+		} cols;
+
+		/* imprint standard layout on COLS tsoa */
+		cols.proto.toffs = (void*)_s->mwal->data;
+		for (size_t i = 0U; i < nflds; i++) {
+			const size_t a = _algn_zrow(flds, i);
+			cols.cols[i] = _s->mwal->data + blkz * a;
+		}
+
 		/* columnify again */
-		;
+		_bang_tick(&cols.proto, _s->wal->data, nt, layo, nflds, nr);
+		_wal_rset(_s->mwal, nt);
 	} else if (UNLIKELY(_s->rt >= nr)) {
 		return 0;
 	}
+	/* we'd be writing NT ticks, offset at _S->RT */
+	nt -= _s->rt;
 	/* time vector first */
-	memcpy(tgt->toffs, _s->mwal->data, sizeof(*tgt->toffs) * nr);
-	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, a = b) {
-		const void *sp = _s->mwal->data + a * blkz;
-		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
-		memcpy(tgt->cols[i], sp, nr * wid);
+	with (const uint8_t *sp = _s->mwal->data) {
+		const size_t wid = sizeof(*tgt->toffs);
+		memcpy(tgt->toffs, sp + _s->rt * wid, nt * wid);
 	}
-	_s->rt += nr;
-	return nr;
+	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, a = b) {
+		const uint8_t *sp = _s->mwal->data + a * blkz;
+		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
+		memcpy(tgt->cols[i], sp + _s->rt * wid, nt * wid);
+	}
+	_s->rt += nt;
+	return nt;
 }
 
 
