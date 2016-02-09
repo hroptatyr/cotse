@@ -682,11 +682,12 @@ fre_out:
 	with (uint64_t bak[nflds + 1U]) {
 		_wal_last(bak, _s->wal);
 		_wal_rset(_s->wal, -1ULL);
-		_wal_rset(_s->mwal, -1ULL);
 		_wal_bang(_s->wal, bak);
 	}
 rst_out:
+	/* and reset both WALs */
 	_wal_rset(_s->wal, 0U);
+	_wal_rset(_s->mwal, 0U);
 	return rc;
 }
 
