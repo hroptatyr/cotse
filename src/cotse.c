@@ -1580,7 +1580,7 @@ _wal_read_ticks:
 		/* imprint standard layout on COLS tsoa */
 		cols.proto.toffs = (void*)_s->mwal->data;
 		for (size_t i = 0U; i < nflds; i++) {
-			const size_t a = _algn_zrow(flds, i);
+			const size_t a = _algn_zrow(layo, i);
 			cols.cols[i] = _s->mwal->data + blkz * a;
 		}
 
