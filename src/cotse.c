@@ -49,6 +49,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <math.h>
+#include <assert.h>
 #include "cotse.h"
 #include "index.h"
 #include "wal.h"
@@ -121,7 +122,9 @@ struct _ss_s {
 
 	/* row-oriented page buffer, wal */
 	struct cots_wal_s *wal;
-	/* memory wal for swapsies */
+	/* memory wal for swapsies,
+	 * this will generally hold column-oriented wal and is
+	 * updated from the row-WAL */
 	struct cots_wal_s *mwal;
 
 	/* currently attached file and its opening flags */
@@ -131,6 +134,8 @@ struct _ss_s {
 	off_t fo;
 	/* current offset for reading */
 	off_t ro;
+	/* offset in ticks within the page */
+	size_t rt;
 
 	/* index, if any, this will be recursive */
 	cots_idx_t idx;
@@ -306,64 +311,39 @@ static int
 _bang_tick(
 	struct cots_tsoa_s *restrict cols,
 	const uint8_t *rows, size_t nrows,
-	const char *flds, size_t nflds)
+	const char *flds, size_t nflds,
+	size_t ot)
 {
-/* columnarise NROWS values in ROWS into COLS accordings to FLDS */
+/* columnarise NROWS values in ROWS into COLS accordings to FLDS
+ * assume OT rows have been written already */
 	const size_t zrow = _algn_zrow(flds, nflds);
 
-	/* columnarise times */
-	with (const cots_to_t *t = (const cots_to_t*)rows) {
-		const size_t acols = zrow / sizeof(*t);
 
-		for (size_t j = 0U; j < nrows; j++) {
-			cols->toffs[j] = t[j * acols];
-		}
+	/* columnarise times */
+	for (size_t j = ot; j < nrows; j++) {
+		memcpy(cols->toffs + j,
+		       rows + j * zrow + 0U, sizeof(*cols->toffs));
 	}
 
 	/* columnarise the rest */
-	for (size_t i = 0U; i < nflds; i++) {
-		/* next one is a bit of a Schlemiel, we could technically
-		 * iteratively compute A, much like _algn_zrow() does it,
-		 * but this way it saves us some explaining */
-		const size_t a = _algn_zrow(flds, i);
+	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+		uint8_t *c = cols->cols[i];
 
-		switch (flds[i]) {
-		case COTS_LO_PRC:
-		case COTS_LO_FLT: {
-			uint32_t *c = cols->cols[i];
-			const uint32_t *r = (const uint32_t*)(rows + a);
-			const size_t acols = zrow / sizeof(*r);
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = r[j * acols];
-			}
-			break;
-		}
-		case COTS_LO_TIM:
-		case COTS_LO_CNT:
-		case COTS_LO_STR:
-		case COTS_LO_SIZ:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL: {
-			uint64_t *c = cols->cols[i];
-			const uint64_t *r = (const uint64_t*)(rows + a);
-			const size_t acols = zrow / sizeof(*r);
-
-			for (size_t j = 0U; j < nrows; j++) {
-				c[j] = r[j * acols];
-			}
-			break;
-		}
-		default:
-			break;
+		/* calculate next A value */
+		b = _algn_zrow(flds, i + 1U);
+		for (size_t j = ot, wid = b - a; j < nrows; j++) {
+			memcpy(c + j * wid, rows + j * zrow + a, wid);
 		}
 	}
 	return 0;
 }
 
 static struct blob_s
-_make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
+_make_blob(
+	const char *flds, size_t nflds,
+	const struct cots_wal_s *src, struct cots_wal_s *restrict tmp)
 {
+	const size_t blkz = src->blkz;
 	struct {
 		struct cots_tsoa_s proto;
 		void *cols[nflds];
@@ -374,9 +354,9 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 	size_t nrows;
 	size_t bi;
 	size_t bsz;
-	size_t z;
+	uint64_t z;
 
-	if (UNLIKELY(!(nrows = _wal_rowi(w)))) {
+	if (UNLIKELY(!(nrows = _wal_rowi(src)))) {
 		/* trivial */
 		return (struct blob_s){0U, NULL};
 	}
@@ -390,15 +370,15 @@ _make_blob(const char *flds, size_t nflds, const struct cots_wal_s *w)
 		return (struct blob_s){0U, NULL};
 	}
 
-	/* prepare the tsoa */
-	cols.proto.toffs = (void*)ALGN16(buf + bi);
-	/* now for the rest */
+	/* imprint standard layout on COLS tsoa using mwal's buffer */
+	cols.proto.toffs = (void*)tmp->data;
 	for (size_t i = 0U; i < nflds; i++) {
-		bi += nrows * sizeof(uint64_t);
-		cols.cols[i] = (void*)ALGN16(buf + bi);
+		const size_t a = _algn_zrow(flds, i);
+		cols.cols[i] = tmp->data + blkz * a;
 	}
 	/* call the columnifier */
-	_bang_tick(&cols.proto, w->data, nrows, flds, nflds);
+	_bang_tick(&cols.proto, src->data, nrows, flds, nflds, _wal_rowi(tmp));
+	_wal_rset(tmp, nrows);
 
 	/* get from and till values */
 	cols.from = cols.proto.toffs[0U];
@@ -648,7 +628,7 @@ _flush(struct _ss_s *_s)
 	}
 
 	/* get ourselves a blob first */
-	b = _make_blob(layo, nflds, _s->wal);
+	b = _make_blob(layo, nflds, _s->wal, _s->mwal);
 
 	if (UNLIKELY(b.data == NULL)) {
 		/* blimey */
@@ -672,6 +652,10 @@ _flush(struct _ss_s *_s)
 			rc = -1;
 			goto fre_out;
 		}
+	}
+	/* devance read offset */
+	if (UNLIKELY(_s->ro > _s->fo)) {
+		_s->ro = _s->fo + b.z;
 	}
 	/* advance file offset and celebrate */
 	_s->fo += b.z;
@@ -701,7 +685,9 @@ fre_out:
 		_wal_bang(_s->wal, bak);
 	}
 rst_out:
+	/* and reset both WALs */
 	_wal_rset(_s->wal, 0U);
+	_wal_rset(_s->mwal, 0U);
 	return rc;
 }
 
@@ -768,10 +754,18 @@ _rd_cpag(struct cots_tsoa_s *restrict tgt,
 		nrows = (zn & 0xffffffU) + 1U;
 		rz = zn >> 24U;
 
+		if (UNLIKELY(rz > z)) {
+			/* more space than is mapped? */
+			nrows = 0U;
+			rz = 0U;
+			break;
+		}
 		/* decompress */
 		ntdcmp = dcmp(tgt, nflds, nrows, layo, p + sizeof(zn), rz);
 		if (UNLIKELY(ntdcmp != nrows)) {
 			nrows = 0U;
+			rz = 0U;
+			break;
 		}
 
 		rz += 2U * sizeof(zn);
@@ -974,7 +968,7 @@ _next_pg(int fd, off_t at)
 	return (struct pagf_s){at, at + z + sizeof(uint64_t), b};
 }
 
-static struct cots_wal_s*
+static int
 _yank_wal(struct _ss_s *_s, off_t eo)
 {
 /* examine last page of _S, create a WAL and bang stuff there */
@@ -989,17 +983,17 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 	f = _prev_pg(_s->fd, _s->fo);
 	if (UNLIKELY(f.beg >= f.end)) {
 		/* empty range is not really WAL-worthy is it? */
-		return NULL;
+		return -1;
 	} else if (UNLIKELY(f.end >= eo)) {
 		/* page ends behind end-of-file? yeah, right! */
-		return NULL;
+		return -1;
 	}
 	/* cross check and get number of ticks*/
 	with (struct pagf_s nf = _next_pg(_s->fd, f.beg)) {
 		/* compare the orng_s portion because the bits might differ */
 		if (UNLIKELY(memcmp(&f, &nf, sizeof(struct orng_s)))) {
 			/* that's just not on */
-			return NULL;
+			return -1;
 		}
 		/* yay, snarf them ticks */
 		nt = nf.bits + 1U;
@@ -1007,8 +1001,11 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 
 	/* get some breathing space */
 	with (const char *fn = _s->public.filename) {
+		assert(_s->mwal == NULL);
 		if (UNLIKELY((res = _wal_create(zrow, blkz, fn)) == NULL)) {
-			return NULL;
+			return -1;
+		} else if ((_s->mwal = _make_wal(zrow, blkz)) == NULL) {
+			goto wal_out;
 		}
 	}
 
@@ -1025,20 +1022,22 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 		ssize_t ntrd;
 
 		/* set up target with the mwal */
-		tgt.toffs = res->data;
+		tgt.toffs = _s->mwal->data;
 		for (size_t i = 0U; i < nflds; i++) {
 			const size_t a = _algn_zrow(layo, i);
-			tgt.flds[i] = res->data + a * blkz;
+			tgt.flds[i] = _s->mwal->data + a * blkz;
 		}
 
 		ntrd = _rd_cpag(&tgt.t, _s->fd, &o, f.end - f.beg, layo, nflds);
 		if (UNLIKELY(ntrd < 0)) {
-			goto wal_out;
+			goto wal_mwal_out;
 		} else if (UNLIKELY(ntrd != nt)) {
 			/* shouldn't we feel sorry and accept at least
 			 * the number of read ticks? */
-			goto wal_out;
+			goto wal_mwal_out;
 		}
+		/* increment column-WAL row counter to NT */
+		_wal_rset(_s->mwal, nt);
 
 		/* wind back file offset, we'll truncate later */
 		_s->fo = f.beg;
@@ -1049,11 +1048,14 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 		_wal_rset(res, nt);
 	}
 	/* otherwise don't read anything back, go with a clean WAL */
-	return res;
+	_s->wal = res;
+	return 0;
 
+wal_mwal_out:
+	_free_wal(_s->mwal);
 wal_out:
 	_free_wal(res);
-	return NULL;
+	return -1;
 }
 
 static int
@@ -1088,9 +1090,21 @@ _move_idx(struct _ss_s *_s, off_t eo)
 		}
 		/* memorise temp file name */
 		_inject_fn(_s->idx, ifn);
-		/* also WALify the index */
+
 		with (struct _ss_s *_sidx = (void*)_s->idx) {
-			_sidx->wal = _yank_wal(_sidx, irng.end - irng.beg);
+			size_t ni;
+
+			/* reprotect the index's header */
+			(void)mprot_any(_sidx->mdr, 0, _hdrz(_sidx), PROT_MEM);
+
+			/* also yank last bob into WAL */
+			if (_yank_wal(_sidx, irng.end - irng.beg) < 0) {
+				break;
+			} else if (!(ni = _wal_rowi(_sidx->wal))) {
+				break;
+			}
+			/* and wind back the counter */
+			_wal_rset(_sidx->wal, --ni);
 		}
 	}
 	return 0;
@@ -1208,7 +1222,9 @@ cots_open_ts(const char *file, int flags)
 		/* read indices and move them */
 		_move_idx(_res, eo);
 		/* turn contents of last page into WAL */
-		_res->wal = _yank_wal(_res, eo);
+		_yank_wal(_res, eo);
+		/* switch off header write protection */
+		(void)mprot_any(_res->mdr, 0, _hdrz(_res), PROT_MEM);
 	}
 	return res;
 
@@ -1296,7 +1312,7 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 			goto unm_out;
 		}
 		/* yep they do, switch off write protection */
-		(void)mprot_any(mdr, 0, hz, PROT_WRITE);
+		(void)mprot_any(mdr, 0, hz, PROT_MEM);
 	}
 
 	/* we're good to go, detach any old files */
@@ -1342,6 +1358,7 @@ cots_detach(cots_ts_t s)
 		;
 	} else if (_s->wal) {
 		/* swap with spare wal */
+		assert(_s->mwal);
 		_s->wal = _s->mwal;
 		_s->mwal = NULL;
 		/* assume flushed wal */
@@ -1520,19 +1537,75 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	const size_t nflds = _s->public.nfields;
 	const char *layo = _s->public.layout;
 	size_t mz;
+	size_t nr;
 
-	if (UNLIKELY(_s->ro >= _s->fo)) {
-		/* no recently added ticks, innit? */
-		return 0;
-	} else if (UNLIKELY(_s->fd < 0)) {
-		/* not backing file */
+	if (UNLIKELY(_s->fd < 0)) {
+		/* no backing file */
 		return -1;
+	} else if (UNLIKELY(_s->ro >= _s->fo)) {
+		/* no compressed ticks on their pages, innit? */
+		goto _wal_read_ticks;
 	}
 
 	/* guesstimate the page that needs mapping */
 	mz = min_z(_s->fo - _s->ro, blkz * nflds * sizeof(uint64_t));
 	/* and read/decomp the page */
-	return _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
+	nr = _rd_cpag(tgt, _s->fd, &_s->ro, mz, layo, nflds);
+	if (LIKELY(!_s->rt)) {
+		return nr;
+	}
+	/* otherwise it's extra-time, kill the first _s->rt ticks then */
+	assert(_s->rt <= nr);
+	/* adapt result value */
+	nr -= _s->rt;
+	/* start with the time offsets */
+	memmove(tgt->toffs, tgt->toffs + _s->rt, nr * sizeof(*tgt->toffs));
+	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, b = a) {
+		uint8_t *tp = tgt->cols[i];
+		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
+		memmove(tp, tp + _s->rt * wid, nr * wid);
+	}
+	_s->rt += nr;
+	_s->rt &= (blkz - 1U);
+	return nr;
+
+_wal_read_ticks:
+	nr = _wal_rowi(_s->mwal);
+	size_t nt = _wal_rowi(_s->wal);
+
+	if (nt > nr) {
+		struct {
+			struct cots_tsoa_s proto;
+			void *cols[nflds];
+		} cols;
+
+		/* imprint standard layout on COLS tsoa */
+		cols.proto.toffs = (void*)_s->mwal->data;
+		for (size_t i = 0U; i < nflds; i++) {
+			const size_t a = _algn_zrow(layo, i);
+			cols.cols[i] = _s->mwal->data + blkz * a;
+		}
+
+		/* columnify again */
+		_bang_tick(&cols.proto, _s->wal->data, nt, layo, nflds, nr);
+		_wal_rset(_s->mwal, nt);
+	} else if (UNLIKELY(_s->rt >= nr)) {
+		return 0;
+	}
+	/* we'd be writing NT ticks, offset at _S->RT */
+	nt -= _s->rt;
+	/* time vector first */
+	with (const uint8_t *sp = _s->mwal->data) {
+		const size_t wid = sizeof(*tgt->toffs);
+		memcpy(tgt->toffs, sp + _s->rt * wid, nt * wid);
+	}
+	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, a = b) {
+		const uint8_t *sp = _s->mwal->data + a * blkz;
+		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
+		memcpy(tgt->cols[i], sp + _s->rt * wid, nt * wid);
+	}
+	_s->rt += nt;
+	return nt;
 }
 
 
