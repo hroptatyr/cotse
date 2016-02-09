@@ -377,7 +377,8 @@ _make_blob(
 		cols.cols[i] = tmp->data + blkz * a;
 	}
 	/* call the columnifier */
-	_bang_tick(&cols.proto, src->data, nrows, flds, nflds, 0U);
+	_bang_tick(&cols.proto, src->data, nrows, flds, nflds, _wal_rowi(tmp));
+	_wal_rset(tmp, nrows);
 
 	/* get from and till values */
 	cols.from = cols.proto.toffs[0U];
