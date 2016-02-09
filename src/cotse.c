@@ -646,6 +646,10 @@ _flush(struct _ss_s *_s)
 			goto fre_out;
 		}
 	}
+	/* devance read offset */
+	if (UNLIKELY(_s->ro > _s->fo)) {
+		_s->ro = _s->fo + b.z;
+	}
 	/* advance file offset and celebrate */
 	_s->fo += b.z;
 
