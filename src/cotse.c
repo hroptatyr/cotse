@@ -228,6 +228,29 @@ log_blkz(size_t b)
 	return __builtin_ctz(b) - 9U;
 }
 
+static __attribute__((const, pure)) size_t
+_layo_wid(const char lo)
+{
+	switch (lo) {
+	case COTS_LO_BYT:
+		return 1U;
+	case COTS_LO_PRC:
+	case COTS_LO_FLT:
+		return 4U;
+	case COTS_LO_TIM:
+	case COTS_LO_CNT:
+	case COTS_LO_STR:
+	case COTS_LO_SIZ:
+	case COTS_LO_QTY:
+	case COTS_LO_DBL:
+		return 8U;
+	case COTS_LO_END:
+	default:
+		break;
+	}
+	return 0U;
+}
+
 static size_t
 _algn_zrow(const char *layout, size_t nflds)
 {
@@ -240,27 +263,21 @@ _algn_zrow(const char *layout, size_t nflds)
 		/* add increment from last iteration */
 		z += inc;
 
-		switch (layout[i]) {
-		case COTS_LO_BYT:
+		switch (_layo_wid(layout[i])) {
+		case 1U:
 			inc = 1U;
 			break;
-		case COTS_LO_PRC:
-		case COTS_LO_FLT:
+		case 4U:
 			/* round Z up to next 4 multiple */
 			z = ALGN4(z);
 			inc = 4U;
 			break;
-		case COTS_LO_TIM:
-		case COTS_LO_CNT:
-		case COTS_LO_STR:
-		case COTS_LO_SIZ:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL:
+		case 8U:
 			/* round Z up to next 8 multiple */
 			z = ALGN8(z);
 			inc = 8U;
 			break;
-		case COTS_LO_END:
+		case 0U:
 		default:
 			z = ALGN8(z);
 			inc = 0U;
