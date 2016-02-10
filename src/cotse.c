@@ -1542,9 +1542,11 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	if (UNLIKELY(_s->fd < 0)) {
 		/* no backing file */
 		return -1;
-	} else if (UNLIKELY(_s->ro >= _s->fo)) {
+	} else if (UNLIKELY(_s->ro >= _s->fo) && _s->mwal) {
 		/* no compressed ticks on their pages, innit? */
 		goto _wal_read_ticks;
+	} else if (UNLIKELY(_s->ro >= _s->fo)) {
+		return 0;
 	}
 
 	/* guesstimate the page that needs mapping */
