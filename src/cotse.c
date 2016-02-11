@@ -1731,4 +1731,52 @@ cots_str(cots_ts_t s, cots_tag_t tag)
 	return _s->ob ? cots_tag_name(_s->ob, tag) : NULL;
 }
 
+
+#if defined TESTING
+#include "munit.h"
+
+int main(void)
+{
+	size_t nfailed = 0U;
+
+	munit_assert_size(_layo_algn(8, 4), ==, 8, nfailed++);
+	munit_assert_size(_layo_algn(10, 4), ==, 12, nfailed++);
+	munit_assert_size(_layo_algn(10, 2), ==, 10, nfailed++);
+	munit_assert_size(_layo_algn(12, 8), ==, 16, nfailed++);
+	munit_assert_size(_layo_algn(17, 1), ==, 17, nfailed++);
+	munit_assert_size(_layo_algn(17, 2), ==, 18, nfailed++);
+	munit_assert_size(_layo_algn(17, 4), ==, 20, nfailed++);
+	munit_assert_size(_layo_algn(17, 0), ==, 24, nfailed++);
+
+	munit_assert_size(_algn_zrow("pq", 0U), ==, 8, nfailed++);
+	munit_assert_size(_algn_zrow("pq", 1U), ==, 16, nfailed++);
+	munit_assert_size(_algn_zrow("pq", 2U), ==, 24, nfailed++);
+
+	munit_assert_size(_algn_zrow("qp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_algn_zrow("qp", 1U), ==, 16, nfailed++);
+	munit_assert_size(_algn_zrow("qp", 2U), ==, 24, nfailed++);
+
+	munit_assert_size(_algn_zrow("pp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_algn_zrow("pp", 1U), ==, 12, nfailed++);
+	munit_assert_size(_algn_zrow("pp", 2U), ==, 16, nfailed++);
+
+	munit_assert_size(_algn_zrow("ppp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_algn_zrow("ppp", 1U), ==, 12, nfailed++);
+	munit_assert_size(_algn_zrow("ppp", 2U), ==, 16, nfailed++);
+	munit_assert_size(_algn_zrow("ppp", 3U), ==, 24, nfailed++);
+
+	munit_assert_size(_algn_zrow("pqp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_algn_zrow("pqp", 1U), ==, 16, nfailed++);
+	munit_assert_size(_algn_zrow("pqp", 2U), ==, 24, nfailed++);
+	munit_assert_size(_algn_zrow("pqp", 3U), ==, 32, nfailed++);
+
+	munit_assert_size(_algn_zrow("ppq", 0U), ==, 8, nfailed++);
+	munit_assert_size(_algn_zrow("ppq", 1U), ==, 12, nfailed++);
+	munit_assert_size(_algn_zrow("ppq", 2U), ==, 16, nfailed++);
+	munit_assert_size(_algn_zrow("ppq", 3U), ==, 24, nfailed++);
+
+	return !nfailed ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+#endif	/* TESTING */
+
 /* cotse.c ends here */
