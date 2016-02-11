@@ -1362,6 +1362,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		/* (re)attach the wal */
 		_s->mwal = _s->wal;
 		_s->wal = _wal_attach(_s->mwal, file);
+		/* consider mwal flushed */
+		_wal_rset(_s->mwal, 0U);
 	}
 	return 0;
 
