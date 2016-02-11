@@ -228,46 +228,80 @@ log_blkz(size_t b)
 	return __builtin_ctz(b) - 9U;
 }
 
+static __attribute__((const, pure)) size_t
+_layo_wid(const char lo)
+{
+	switch (lo) {
+	case COTS_LO_BYT:
+		return 1U;
+	case COTS_LO_PRC:
+	case COTS_LO_FLT:
+		return 4U;
+	case COTS_LO_TIM:
+	case COTS_LO_CNT:
+	case COTS_LO_STR:
+	case COTS_LO_SIZ:
+	case COTS_LO_QTY:
+	case COTS_LO_DBL:
+		return 8U;
+	case COTS_LO_END:
+	default:
+		break;
+	}
+	return 0U;
+}
+
+static __attribute__((const, pure)) size_t
+_layo_algn(size_t lz, size_t wid)
+{
+	switch (wid) {
+	case 1U:
+		break;
+	case 2U:
+		lz = ALGN2(lz);
+		break;
+	case 4U:
+		lz = ALGN4(lz);
+		break;
+	case 8U:
+	case 0U:
+	default:
+		lz = ALGN8(lz);
+		break;
+	}
+	return lz;
+}
+
 static size_t
-_algn_zrow(const char *layout, size_t nflds)
+_layo_zrow(const char *layout, size_t nfields)
 {
 /* calculate sizeof(`layout') with alignments and stuff
  * to be used as partial summator align size of the first NFLDS fields
  * to the alignment requirements of the NFLDS+1st field */
 	size_t z = 0U;
 
-	for (size_t i = 0U, inc = sizeof(cots_to_t); i <= nflds; i++) {
+	for (size_t i = 0U, inc = sizeof(cots_to_t); i <= nfields; i++) {
 		/* add increment from last iteration */
 		z += inc;
-
-		switch (layout[i]) {
-		case COTS_LO_BYT:
-			inc = 1U;
-			break;
-		case COTS_LO_PRC:
-		case COTS_LO_FLT:
-			/* round Z up to next 4 multiple */
-			z = ALGN4(z);
-			inc = 4U;
-			break;
-		case COTS_LO_TIM:
-		case COTS_LO_CNT:
-		case COTS_LO_STR:
-		case COTS_LO_SIZ:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL:
-			/* round Z up to next 8 multiple */
-			z = ALGN8(z);
-			inc = 8U;
-			break;
-		case COTS_LO_END:
-		default:
-			z = ALGN8(z);
-			inc = 0U;
-			break;
-		}
+		inc = _layo_wid(layout[i]);
+		z = _layo_algn(z, inc);
 	}
 	return z;
+}
+
+static int
+_layo_impr(struct cots_tsoa_s *tgt, void *mem,
+	   const char *flds, size_t nflds, size_t blkz)
+{
+/* imprint standard layout for FLDS on TGT tsoa using MEM as buffer */
+	uint8_t *mp = mem;
+
+	tgt->toffs = (void*)(mp + 0U);
+	for (size_t i = 0U, a = _layo_zrow(flds, i), wid; i < nflds;
+	     wid = _layo_wid(flds[i]), a += wid, a = _layo_algn(a, wid), i++) {
+		tgt->cols[i] = mp + blkz * a;
+	}
+	return 0;
 }
 
 
@@ -288,19 +322,19 @@ _bang_tsoa(
 	const char *flds, size_t nflds)
 {
 /* rowify NROWS values in COLS into ROWS according to FLDS */
-	const size_t zrow = _algn_zrow(flds, nflds);
+	const size_t zrow = _layo_zrow(flds, nflds);
 
 	/* bang toffs */
 	for (size_t j = 0U; j < nrows; j++) {
 		memcpy(rows + j * zrow + 0U,
 		       cols->toffs + j, sizeof(*cols->toffs));
 	}
-	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+	for (size_t i = 0U, a = _layo_zrow(flds, i), wid = 0U; i < nflds; i++) {
 		uint8_t *cp = cols->cols[i];
 
-		/* calculate next A value */
-		b = _algn_zrow(flds, i + 1U);
-		for (size_t j = 0U, wid = b - a; j < nrows; j++) {
+		/* get current field's width and alignment */
+		a += wid, wid = _layo_wid(flds[i]), a = _layo_algn(a, wid);
+		for (size_t j = 0U; j < nrows; j++) {
 			memcpy(rows + j * zrow + a, cp + j * wid, wid);
 		}
 	}
@@ -316,7 +350,7 @@ _bang_tick(
 {
 /* columnarise NROWS values in ROWS into COLS accordings to FLDS
  * assume OT rows have been written already */
-	const size_t zrow = _algn_zrow(flds, nflds);
+	const size_t zrow = _layo_zrow(flds, nflds);
 
 
 	/* columnarise times */
@@ -326,12 +360,12 @@ _bang_tick(
 	}
 
 	/* columnarise the rest */
-	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+	for (size_t i = 0U, a = _layo_zrow(flds, i), wid = 0U; i < nflds; i++) {
 		uint8_t *c = cols->cols[i];
 
-		/* calculate next A value */
-		b = _algn_zrow(flds, i + 1U);
-		for (size_t j = ot, wid = b - a; j < nrows; j++) {
+		/* get current field's width and alignment */
+		a += wid, wid = _layo_wid(flds[i]), a = _layo_algn(a, wid);
+		for (size_t j = ot; j < nrows; j++) {
 			memcpy(c + j * wid, rows + j * zrow + a, wid);
 		}
 	}
@@ -372,8 +406,8 @@ _make_blob(
 
 	/* imprint standard layout on COLS tsoa using mwal's buffer */
 	cols.proto.toffs = (void*)tmp->data;
-	for (size_t i = 0U; i < nflds; i++) {
-		const size_t a = _algn_zrow(flds, i);
+	for (size_t i = 0U, a = _layo_zrow(flds, i), wid; i < nflds;
+	     wid = _layo_wid(flds[i]), a += wid, a = _layo_algn(a, wid), i++) {
 		cols.cols[i] = tmp->data + blkz * a;
 	}
 	/* call the columnifier */
@@ -975,7 +1009,7 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 	const char *layo = _s->public.layout;
 	const size_t nflds = _s->public.nfields;
 	const size_t blkz = _s->public.blockz;
-	const size_t zrow = _algn_zrow(layo, nflds);
+	const size_t zrow = _layo_zrow(layo, nflds);
 	struct cots_wal_s *res;
 	struct pagf_s f;
 	size_t nt;
@@ -1021,12 +1055,8 @@ _yank_wal(struct _ss_s *_s, off_t eo)
 		off_t o = f.beg;
 		ssize_t ntrd;
 
-		/* set up target with the mwal */
-		tgt.toffs = _s->mwal->data;
-		for (size_t i = 0U; i < nflds; i++) {
-			const size_t a = _algn_zrow(layo, i);
-			tgt.flds[i] = _s->mwal->data + a * blkz;
-		}
+		/* imprint standard layout on COLS tsoa using mwal's buffer */
+		_layo_impr(&tgt.t, _s->mwal->data, layo, nflds, blkz);
 
 		ntrd = _rd_cpag(&tgt.t, _s->fd, &o, f.end - f.beg, layo, nflds);
 		if (UNLIKELY(ntrd < 0)) {
@@ -1127,7 +1157,7 @@ make_cots_ts(const char *layout, size_t blockz)
 	if (LIKELY(layout != NULL)) {
 		res->public.layout = strdup(layout);
 		laylen = strlen(layout);
-		zrow = _algn_zrow(layout, laylen);
+		zrow = _layo_zrow(layout, laylen);
 	} else {
 		res->public.layout = nul_layout;
 		laylen = 0U;
@@ -1332,6 +1362,8 @@ cots_attach(cots_ts_t s, const char *file, int flags)
 		/* (re)attach the wal */
 		_s->mwal = _s->wal;
 		_s->wal = _wal_attach(_s->mwal, file);
+		/* consider mwal flushed */
+		_wal_rset(_s->mwal, 0U);
 	}
 	return 0;
 
@@ -1463,6 +1495,7 @@ cots_write_va(cots_ts_t s, cots_to_t t, ...)
 {
 	struct _ss_s *_s = (void*)s;
 	const char *flds = _s->public.layout;
+	const size_t nflds = _s->public.nfields;
 	uint8_t rp[_s->wal->zrow] __attribute__((aligned(16)));
 	va_list vap;
 
@@ -1470,25 +1503,20 @@ cots_write_va(cots_ts_t s, cots_to_t t, ...)
 		*tp = t;
 	}
 	va_start(vap, t);
-	for (size_t i = 0U, n = _s->public.nfields; i < n; i++) {
-		/* next one is a bit of a Schlemiel, we could technically
-		 * iteratively compute A, much like _algn_zrow() does it,
-		 * but this way it saves us some explaining */
-		const size_t a = _algn_zrow(flds, i);
+	for (size_t i = 0U, a = _layo_zrow(flds, i), wid = 0U; i < nflds; i++) {
+		/* get current field's width and alignment */
+		a += wid, wid = _layo_wid(flds[i]), a = _layo_algn(a, wid);
 
-		switch (_s->public.layout[i]) {
-		case COTS_LO_PRC:
-		case COTS_LO_FLT: {
+		switch (wid) {
+		case 1U:
+		case 2U:
+		case 4U: {
 			uint32_t *cp = (uint32_t*)(rp + a);
 			*cp = va_arg(vap, uint32_t);
 			break;
 		}
-		case COTS_LO_TIM:
-		case COTS_LO_CNT:
-		case COTS_LO_STR:
-		case COTS_LO_SIZ:
-		case COTS_LO_QTY:
-		case COTS_LO_DBL: {
+
+		case 8U: {
 			uint64_t *cp = (uint64_t*)(rp + a);
 			*cp = va_arg(vap, uint64_t);
 			break;
@@ -1562,9 +1590,9 @@ cots_read_ticks(struct cots_tsoa_s *restrict tgt, cots_ts_t s)
 	nr -= _s->rt;
 	/* start with the time offsets */
 	memmove(tgt->toffs, tgt->toffs + _s->rt, nr * sizeof(*tgt->toffs));
-	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, b = a) {
+	for (size_t i = 0U; i < nflds; i++) {
 		uint8_t *tp = tgt->cols[i];
-		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
+		const size_t wid = _layo_wid(layo[i]);
 		memmove(tp, tp + _s->rt * wid, nr * wid);
 	}
 	_s->rt += nr;
@@ -1582,11 +1610,7 @@ _wal_read_ticks:
 		} cols;
 
 		/* imprint standard layout on COLS tsoa */
-		cols.proto.toffs = (void*)_s->mwal->data;
-		for (size_t i = 0U; i < nflds; i++) {
-			const size_t a = _algn_zrow(layo, i);
-			cols.cols[i] = _s->mwal->data + blkz * a;
-		}
+		_layo_impr(&cols.proto, _s->mwal->data, layo, nflds, blkz);
 
 		/* columnify again */
 		_bang_tick(&cols.proto, _s->wal->data, nt, layo, nflds, nr);
@@ -1601,9 +1625,11 @@ _wal_read_ticks:
 		const size_t wid = sizeof(*tgt->toffs);
 		memcpy(tgt->toffs, sp + _s->rt * wid, nt * wid);
 	}
-	for (size_t i = 0U, a = _algn_zrow(layo, i), b; i < nflds; i++, a = b) {
-		const uint8_t *sp = _s->mwal->data + a * blkz;
-		const size_t wid = (b = _algn_zrow(layo, i + 1U), b - a);
+	for (size_t i = 0U, a = _layo_zrow(layo, i), wid = 0U; i < nflds; i++) {
+		const uint8_t *sp;
+
+		a += wid, wid = _layo_wid(layo[i]), a = _layo_algn(a, wid);
+		sp = _s->mwal->data + a * blkz;
 		memcpy(tgt->cols[i], sp + _s->rt * wid, nt * wid);
 	}
 	_s->rt += nt;
@@ -1708,5 +1734,53 @@ cots_str(cots_ts_t s, cots_tag_t tag)
 	struct _ss_s *_s = (void*)s;
 	return _s->ob ? cots_tag_name(_s->ob, tag) : NULL;
 }
+
+
+#if defined TESTING
+#include "munit.h"
+
+int main(void)
+{
+	size_t nfailed = 0U;
+
+	munit_assert_size(_layo_algn(8, 4), ==, 8, nfailed++);
+	munit_assert_size(_layo_algn(10, 4), ==, 12, nfailed++);
+	munit_assert_size(_layo_algn(10, 2), ==, 10, nfailed++);
+	munit_assert_size(_layo_algn(12, 8), ==, 16, nfailed++);
+	munit_assert_size(_layo_algn(17, 1), ==, 17, nfailed++);
+	munit_assert_size(_layo_algn(17, 2), ==, 18, nfailed++);
+	munit_assert_size(_layo_algn(17, 4), ==, 20, nfailed++);
+	munit_assert_size(_layo_algn(17, 0), ==, 24, nfailed++);
+
+	munit_assert_size(_layo_zrow("pq", 0U), ==, 8, nfailed++);
+	munit_assert_size(_layo_zrow("pq", 1U), ==, 16, nfailed++);
+	munit_assert_size(_layo_zrow("pq", 2U), ==, 24, nfailed++);
+
+	munit_assert_size(_layo_zrow("qp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_layo_zrow("qp", 1U), ==, 16, nfailed++);
+	munit_assert_size(_layo_zrow("qp", 2U), ==, 24, nfailed++);
+
+	munit_assert_size(_layo_zrow("pp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_layo_zrow("pp", 1U), ==, 12, nfailed++);
+	munit_assert_size(_layo_zrow("pp", 2U), ==, 16, nfailed++);
+
+	munit_assert_size(_layo_zrow("ppp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_layo_zrow("ppp", 1U), ==, 12, nfailed++);
+	munit_assert_size(_layo_zrow("ppp", 2U), ==, 16, nfailed++);
+	munit_assert_size(_layo_zrow("ppp", 3U), ==, 24, nfailed++);
+
+	munit_assert_size(_layo_zrow("pqp", 0U), ==, 8, nfailed++);
+	munit_assert_size(_layo_zrow("pqp", 1U), ==, 16, nfailed++);
+	munit_assert_size(_layo_zrow("pqp", 2U), ==, 24, nfailed++);
+	munit_assert_size(_layo_zrow("pqp", 3U), ==, 32, nfailed++);
+
+	munit_assert_size(_layo_zrow("ppq", 0U), ==, 8, nfailed++);
+	munit_assert_size(_layo_zrow("ppq", 1U), ==, 12, nfailed++);
+	munit_assert_size(_layo_zrow("ppq", 2U), ==, 16, nfailed++);
+	munit_assert_size(_layo_zrow("ppq", 3U), ==, 24, nfailed++);
+
+	return !nfailed ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+#endif	/* TESTING */
 
 /* cotse.c ends here */
