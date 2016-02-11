@@ -251,6 +251,27 @@ _layo_wid(const char lo)
 	return 0U;
 }
 
+static __attribute__((const, pure)) size_t
+_layo_algn(size_t lz, size_t wid)
+{
+	switch (wid) {
+	case 1U:
+		break;
+	case 2U:
+		lz = ALGN2(lz);
+		break;
+	case 4U:
+		lz = ALGN4(lz);
+		break;
+	case 8U:
+	case 0U:
+	default:
+		lz = ALGN8(lz);
+		break;
+	}
+	return lz;
+}
+
 static size_t
 _algn_zrow(const char *layout, size_t nflds)
 {
@@ -263,26 +284,8 @@ _algn_zrow(const char *layout, size_t nflds)
 		/* add increment from last iteration */
 		z += inc;
 
-		switch (_layo_wid(layout[i])) {
-		case 1U:
-			inc = 1U;
-			break;
-		case 4U:
-			/* round Z up to next 4 multiple */
-			z = ALGN4(z);
-			inc = 4U;
-			break;
-		case 8U:
-			/* round Z up to next 8 multiple */
-			z = ALGN8(z);
-			inc = 8U;
-			break;
-		case 0U:
-		default:
-			z = ALGN8(z);
-			inc = 0U;
-			break;
-		}
+		inc = _layo_wid(layout[i]);
+		z = _layo_algn(z, inc);
 	}
 	return z;
 }
@@ -343,14 +346,16 @@ _bang_tick(
 	}
 
 	/* columnarise the rest */
-	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+	for (size_t i = 0U, a = sizeof(cots_to_t); i < nflds; i++) {
 		uint8_t *c = cols->cols[i];
+		const size_t wid = _layo_wid(flds[i]);
 
-		/* calculate next A value */
-		b = _algn_zrow(flds, i + 1U);
-		for (size_t j = ot, wid = b - a; j < nrows; j++) {
+		/* calculate alignment */
+		a = _layo_algn(a, wid);
+		for (size_t j = ot; j < nrows; j++) {
 			memcpy(c + j * wid, rows + j * zrow + a, wid);
 		}
+		a += wid;
 	}
 	return 0;
 }
