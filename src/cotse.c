@@ -315,12 +315,14 @@ _bang_tsoa(
 		memcpy(rows + j * zrow + 0U,
 		       cols->toffs + j, sizeof(*cols->toffs));
 	}
-	for (size_t i = 0U, a = _algn_zrow(flds, i), b; i < nflds; i++, a = b) {
+	for (size_t i = 0U, a = _algn_zrow(flds, i), wid = 0U; i < nflds; i++) {
 		uint8_t *cp = cols->cols[i];
 
-		/* calculate next A value */
-		b = _algn_zrow(flds, i + 1U);
-		for (size_t j = 0U, wid = b - a; j < nrows; j++) {
+		/* get current field's width and alignment */
+		a += wid;
+		wid = _layo_wid(flds[i]);
+		a = _layo_algn(a, wid);
+		for (size_t j = 0U; j < nrows; j++) {
 			memcpy(rows + j * zrow + a, cp + j * wid, wid);
 		}
 	}
@@ -346,16 +348,16 @@ _bang_tick(
 	}
 
 	/* columnarise the rest */
-	for (size_t i = 0U, a = sizeof(cots_to_t); i < nflds; i++) {
+	for (size_t i = 0U, a = _algn_zrow(flds, i), wid = 0U; i < nflds; i++) {
 		uint8_t *c = cols->cols[i];
-		const size_t wid = _layo_wid(flds[i]);
 
-		/* calculate alignment */
+		/* get current field's width and alignment */
+		a += wid;
+		wid = _layo_wid(flds[i]);
 		a = _layo_algn(a, wid);
 		for (size_t j = ot; j < nrows; j++) {
 			memcpy(c + j * wid, rows + j * zrow + a, wid);
 		}
-		a += wid;
 	}
 	return 0;
 }
