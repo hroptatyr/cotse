@@ -190,7 +190,6 @@ munit_logf_ex(MunitLogLevel level, const char* filename, int line, const char* f
     if (munit_error_jmp_buf_valid)
       longjmp(munit_error_jmp_buf, 1);
 #endif
-    abort();
   }
 }
 
