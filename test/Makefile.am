@@ -49,6 +49,9 @@ TESTS += creat_02.clit
 check_PROGRAMS += open_twice_01
 TESTS += open_twice_01.clit
 
+check_PROGRAMS += appnd_01
+TESTS += appnd_01.clit
+
 
 cotse.c: $(top_srcdir)/src/cotse.c
 	$(LN_S) $< $@
